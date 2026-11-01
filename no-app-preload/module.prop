@@ -1,0 +1,6 @@
+id=no-app-preload
+name=关闭应用预加载
+version=1.0
+versionCode=1
+author=local
+description=关闭进程预启动 persist.sys.prestart.proc 和应用预加载 persist.sys.preload.enable。只改内存属性；关闭或卸载本模块后重启，恢复 build.prop 默认值。
