@@ -1,6 +1,6 @@
 id=miui-localization
 name=MIUI Localization
-version=1.3
-versionCode=4
+version=1.4
+versionCode=5
 author=local
-description=将未安装的 MIUI 桌面搜索挂载为系统应用。手机上已有同包名应用时跳过。日志：/data/adb/miui-localization.log
+description=挂载未安装的 MIUI 桌面搜索和小爱同学。手机上已有同包名应用时跳过。日志：/data/adb/miui-localization.log

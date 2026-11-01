@@ -9,16 +9,56 @@ else
   exit 0
 fi
 
-APK_SRC="$MODDIR/product/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk"
-PERM_SRC="$MODDIR/product/etc/permissions/privapp-permissions-miui-localization.xml"
 MNT=/data/adb/miui-localization-mnt
+SRC="$MODDIR/product"
 
 log_msg "start moddir=$MODDIR"
 
-if [ ! -f "$APK_SRC" ]; then
-  log_msg "result=skip reason=apk-not-in-module path=$APK_SRC"
-  exit 0
-fi
+stage_tree() {
+  CATEGORY="$1"
+  FROM="$SRC/$CATEGORY"
+  if [ ! -d "$FROM" ]; then
+    log_msg "stage skip reason=missing category=$CATEGORY"
+    return 1
+  fi
+  FOUND=0
+  for apk in "$FROM"/*/*.apk; do
+    if [ ! -f "$apk" ]; then
+      continue
+    fi
+    FOUND=1
+    APP=$(basename "$(dirname "$apk")")
+    BASE=$(basename "$apk")
+    mkdir -p "$MNT/$CATEGORY/$APP"
+    cp -a "$apk" "$MNT/$CATEGORY/$APP/$BASE"
+    chmod 0755 "$MNT/$CATEGORY" "$MNT/$CATEGORY/$APP"
+    chmod 0644 "$MNT/$CATEGORY/$APP/$BASE"
+    chcon u:object_r:system_file:s0 "$MNT/$CATEGORY" "$MNT/$CATEGORY/$APP" "$MNT/$CATEGORY/$APP/$BASE"
+    BYTES=$(wc -c < "$MNT/$CATEGORY/$APP/$BASE" | tr -d ' ')
+    log_msg "staged category=$CATEGORY app=$APP bytes=$BYTES"
+  done
+  if [ "$FOUND" -eq 0 ]; then
+    log_msg "stage skip reason=no-apk category=$CATEGORY"
+    return 1
+  fi
+  return 0
+}
+
+mount_overlay() {
+  CATEGORY="$1"
+  TARGET="$2"
+  MIEXT="$3"
+  if [ ! -d "$MNT/$CATEGORY" ]; then
+    log_msg "overlay skip reason=not-staged category=$CATEGORY"
+    return 0
+  fi
+  if [ ! -d "$MIEXT" ] || [ ! -d "$TARGET" ]; then
+    log_msg "overlay skip reason=target-missing category=$CATEGORY target=$TARGET miext=$MIEXT"
+    return 0
+  fi
+  mount -t overlay overlay -o "lowerdir=${MNT}/${CATEGORY}:${MIEXT}:${TARGET},redirect_dir=on" "$TARGET"
+  log_msg "overlay category=$CATEGORY exit=$? target=$TARGET"
+}
 
 mkdir -p "$MNT"
 if grep -q " $MNT " /proc/mounts; then
@@ -28,31 +68,63 @@ else
   log_msg "tmpfs mount path=$MNT exit=$?"
 fi
 
-mkdir -p "$MNT/priv-app/MIUIQuickSearchBox"
-cp -a "$APK_SRC" "$MNT/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk"
-chmod 0755 "$MNT/priv-app" "$MNT/priv-app/MIUIQuickSearchBox"
-chmod 0644 "$MNT/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk"
-chcon u:object_r:system_file:s0 "$MNT/priv-app/MIUIQuickSearchBox" "$MNT/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk"
-BYTES=$(wc -c < "$MNT/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk" | tr -d ' ')
-log_msg "staged apk bytes=$BYTES"
+ANY=0
+for CATEGORY in priv-app app data-app overlay; do
+  if stage_tree "$CATEGORY"; then
+    ANY=1
+  fi
+done
 
-mount -t overlay overlay -o "lowerdir=${MNT}/priv-app:/mnt/vendor/mi_ext/product/priv-app:/product/priv-app,redirect_dir=on" /product/priv-app
-log_msg "overlay priv-app exit=$?"
+if [ "$ANY" -eq 0 ]; then
+  log_msg "result=skip reason=no-apk"
+  exit 0
+fi
 
-if [ -f "$PERM_SRC" ] && [ -d /mnt/vendor/mi_ext/product/etc/permissions ] && [ -d /product/etc/permissions ]; then
+mount_overlay priv-app /product/priv-app /mnt/vendor/mi_ext/product/priv-app
+mount_overlay app /product/app /mnt/vendor/mi_ext/product/app
+mount_overlay data-app /product/data-app /mnt/vendor/mi_ext/product/data-app
+mount_overlay overlay /product/overlay /mnt/vendor/mi_ext/product/overlay
+
+PERM_SRC="$SRC/etc/permissions"
+if [ -d "$PERM_SRC" ] && [ -d /mnt/vendor/mi_ext/product/etc/permissions ] && [ -d /product/etc/permissions ]; then
   mkdir -p "$MNT/permissions"
-  cp -a "$PERM_SRC" "$MNT/permissions/privapp-permissions-miui-localization.xml"
   chmod 0755 "$MNT/permissions"
-  chmod 0644 "$MNT/permissions/privapp-permissions-miui-localization.xml"
-  chcon u:object_r:system_file:s0 "$MNT/permissions" "$MNT/permissions/privapp-permissions-miui-localization.xml"
-  mount -t overlay overlay -o "lowerdir=${MNT}/permissions:/mnt/vendor/mi_ext/product/etc/permissions:/product/etc/permissions,redirect_dir=on" /product/etc/permissions
-  log_msg "overlay permissions exit=$?"
+  chcon u:object_r:system_file:s0 "$MNT/permissions"
+  PERM_N=0
+  for xml in "$PERM_SRC"/*.xml; do
+    if [ ! -f "$xml" ]; then
+      continue
+    fi
+    BASE=$(basename "$xml")
+    cp -a "$xml" "$MNT/permissions/$BASE"
+    chmod 0644 "$MNT/permissions/$BASE"
+    chcon u:object_r:system_file:s0 "$MNT/permissions/$BASE"
+    log_msg "staged perm=$BASE"
+    PERM_N=$((PERM_N + 1))
+  done
+  if [ "$PERM_N" -gt 0 ]; then
+    mount -t overlay overlay -o "lowerdir=${MNT}/permissions:/mnt/vendor/mi_ext/product/etc/permissions:/product/etc/permissions,redirect_dir=on" /product/etc/permissions
+    log_msg "overlay permissions exit=$? count=$PERM_N"
+  else
+    log_msg "permissions overlay skipped reason=no-xml"
+  fi
 else
   log_msg "permissions overlay skipped src=$PERM_SRC"
 fi
 
-if [ -f /product/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk ]; then
-  log_msg "result=mounted path=/product/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk"
-else
-  log_msg "result=not-visible path=/product/priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk"
-fi
+for REL in \
+  priv-app/MIUIQuickSearchBox/MIUIQuickSearchBox.apk \
+  priv-app/VoiceAssistAndroidT/VoiceAssistAndroidT.apk \
+  app/VoiceTrigger/VoiceTrigger.apk \
+  app/MIUIAiasstService/MIUIAiasstService.apk \
+  app/XiaoaiRecommendation/XiaoaiRecommendation.apk \
+  data-app/MIUIXiaoAiSpeechEngine/MIUIXiaoAiSpeechEngine.apk \
+  data-app/VoiceAssistProxy/VoiceAssistProxy.apk \
+  overlay/VoiceAssistAndroidOverlay/VoiceAssistAndroidOverlay.apk
+do
+  if [ -f "/product/$REL" ]; then
+    log_msg "result=mounted path=/product/$REL"
+  else
+    log_msg "result=not-visible path=/product/$REL"
+  fi
+done
