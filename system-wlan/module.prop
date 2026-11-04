@@ -1,0 +1,6 @@
+id=system-wlan
+name=系统应用 WLAN
+version=1.0
+versionCode=1
+author=local
+description=允许在应用详情里关闭系统应用的 WLAN。开机完成后再挂载手机管家，避免签名校验扫到改过的安装包。查找设备、网络栈和强制门户仍保持锁定。

@@ -1,0 +1,6 @@
+id=fp-study-toggle
+name=指纹学习开关
+version=1.0
+versionCode=1
+author=local
+description=在 KernelSU 模块列表左侧点执行按钮，开关超声波指纹的学习。关闭后，成功解锁不再把这次图像写进模板，避免只有微湿才能解开时把模板越学越偏。已录入的指纹不会因此变好，需要到设置里删掉，用干手重新录入。打开后，成功解锁会继续更新模板。状态写在 persist.vendor.sys.fp.disable_study，卸载模块不会自动改回。

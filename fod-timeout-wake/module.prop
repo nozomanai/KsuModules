@@ -1,0 +1,6 @@
+id=fod-timeout-wake
+name=熄屏指纹超时亮屏
+version=1.0
+versionCode=1
+author=local
+description=熄屏按住指纹，0.3 秒内没解开就亮起锁屏。适配 OS3.0.307.0.WOCCNXM 的 MiuiSystemUI。日志：/data/adb/fod-timeout-wake.log

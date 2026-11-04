@@ -8,10 +8,17 @@ else
   log_msg() { echo "$1"; }
 fi
 
-# 先停 partnersetup，避免它把刚冻结的组件重新打开。
+# 能把服务重新拉起来的应用先停，partnersetup 和设置向导也在这批。
 OFF_ORDER="
 com.google.android.partnersetup
 com.google.android.setupwizard
+com.google.android.googlequicksearchbox
+com.google.android.tts
+com.android.hotwordenrollment.okgoogle
+com.android.hotwordenrollment.xgoogle
+com.google.android.inputmethod.latin
+com.google.android.projection.gearhead
+com.google.android.marvin.talkback
 com.google.android.gms.location.history
 com.google.android.syncadapters.contacts
 com.google.android.syncadapters.calendar
@@ -25,7 +32,7 @@ com.google.android.gsf
 com.android.vending
 "
 
-# 先恢复框架和商店，最后再放开 partnersetup。
+# 先恢复框架和商店，最后再放开设置向导和 partnersetup。
 ON_ORDER="
 com.google.android.gms
 com.google.android.gsf
@@ -38,6 +45,13 @@ com.google.android.onetimeinitializer
 com.google.android.feedback
 com.google.android.apps.restore
 com.google.android.printservice.recommendation
+com.google.android.googlequicksearchbox
+com.google.android.tts
+com.android.hotwordenrollment.okgoogle
+com.android.hotwordenrollment.xgoogle
+com.google.android.inputmethod.latin
+com.google.android.projection.gearhead
+com.google.android.marvin.talkback
 com.google.android.setupwizard
 com.google.android.partnersetup
 "
@@ -80,6 +94,13 @@ app_name() {
     com.google.android.feedback) echo "Google 反馈" ;;
     com.google.android.apps.restore) echo "Google 恢复" ;;
     com.google.android.printservice.recommendation) echo "Google 打印推荐" ;;
+    com.google.android.googlequicksearchbox) echo "Google" ;;
+    com.google.android.tts) echo "谷歌语音服务" ;;
+    com.android.hotwordenrollment.okgoogle) echo "Ok Google 语音注册" ;;
+    com.android.hotwordenrollment.xgoogle) echo "Ok Google 语音注册" ;;
+    com.google.android.inputmethod.latin) echo "Gboard" ;;
+    com.google.android.projection.gearhead) echo "Android Auto" ;;
+    com.google.android.marvin.talkback) echo "TalkBack" ;;
     *) echo "$1" ;;
   esac
 }
