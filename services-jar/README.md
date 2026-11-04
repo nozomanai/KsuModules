@@ -1,4 +1,4 @@
-# 划卡强行停止与自启动对齐
+# services-jar
 
 KernelSU 模块。替换 `/system_ext/framework/miui-services.jar`，让国际版的划卡杀进程和自启动拦截与大陆版一致。目标机型小米 15（dada），系统 `OS3.0.307.0.WOCCNXM`，`ro.product.mod_device=dada_xiaomieu_global`。
 
@@ -45,11 +45,35 @@ SHA256 `41466bd4d48c1464abe6cca91a409543b823803104198e99390e66fa99ba6c4f`
 - `AlarmManagerServiceStubImpl.init`：不追加资源 `0x11030001` 的国际版闹钟白名单。
 - `PolicyManager` 静态初始化：`CN_MODEL` 固定为 true，不再读 `ro.miui.region`。
 
-开机脚本 `post-fs-data.sh` 把模块里的 jar 绑定到 `/system_ext/framework/miui-services.jar`。日志在 `/data/adb/system-server.log`。
+开机脚本 `post-fs-data.sh` 把模块里的文件绑定到：
+
+- `/system_ext/framework/miui-services.jar`
+- `/system/framework/services.jar`
+- `/odm/lib64/libqc_hal.so`
+
+`/system`、`/system_ext`、`/odm` 都是 erofs，KernelSU 的普通挂载替换不了这三个文件。`mfp-daemon` 属于 `late_start`，绑定发生在它启动之前。脚本若发现它已经在跑，会 `stop` 再 `start`，让它重新映射改过的库。模块里的 `libqc_hal.so` 会被标成 `system_file`，`vendor_mfp-daemon` 读不到，指纹 HAL 就会把 `persist.vendor.sys.fp.vendor` 写成 `none`，设置里的指纹解锁也会消失。脚本在绑定之后把这个库改成 `vendor_file`。日志在 `/data/adb/services-jar.log`。
+
+## 人脸解锁清掉指纹失败次数
+
+失败次数在高通超声波指纹 HAL 的用户态计数里，不在 SystemUI，也不在 `miui-services.jar`。这台机器 `persist.vendor.qfp.hal_enable_lockout` 默认是 0，`mTaLockoutHandling` 是 0，计数不在 TA 里。指纹比对成功时 HAL 自己清零。人脸 sensor 8 的强度是 4095（convenience），`BiometricService.resetLockoutTimeBound` 要求强度至少 15，所以人脸成功不能走那条正式接口。
+
+人脸认证成功时，`FaceAuthenticationClient.onAuthenticated` 对每个指纹传感器调用 `FingerprintManager.resetLockout`，令牌是 69 字节的 0。传入 null 时 `FingerprintResetLockoutClient` 不调用 HAL。69 字节的 0 会编成一个字段全空的 `HardwareAuthToken`，HAL 才会收到这次 reset。异常只打日志，不打断人脸解锁。
+
+`libqc_hal.so` 的 `QfpService::resetLockout` 原来会验硬件令牌，验失败就不清次数；`hal_enable_lockout` 为 0 时还会在清零前直接返回。现在这三处都改成继续走原来的清零：
+
+- `0x5f998` 的 `cbz` 改成无条件跳到校验成功后的清零。
+- `0x5f7ec` 的 `cbnz` 改成 `nop`，V2 校验失败也清。
+- `0x5f798` 的提前返回改成 `nop`。
+
+密码解开走另一条路。`BiometricDeferredQueue.processPendingLockoutsForFingerprint` 在传感器既要硬件令牌、又要 challenge 时，原来只打 `No fingerprint HAL interface requires HAT with challenge`，不调用 reset。现在这种传感器也向 Gatekeeper 要令牌再 `resetLockout`。不要令牌的传感器仍用空令牌，和原来一样。
+
+`services.jar` 的 smali 在 `D:\Phone\Mi15\modified\services`。只改了 `classes.dex` 和 `classes2.dex`，用 baksmali/smali 3.0.10 按 API 29 回编，魔数仍是 `dex 039`。原文件 SHA256 `3247e260f765dce05f5324e5106727314d22f691043643fd8b1fd15a136dc092`。模块内 `services.jar` SHA256 `131a03bf0319159f930e10b728d29f7e994dc6624fa5aaf12bebcaef0819e3a1`。
+
+原 `libqc_hal.so` SHA256 `4017b7d98119da8502c68f739e7d2e8df94dcb447c7de6a00d772f1eb62999ff`。模块内 SHA256 `282d6745de4763443f977ffc6c6f8e1966393ab5b7c517f41f4499b07070a103`。
 
 ## 遇到的坑
 
-`/system_ext` 是独立的 erofs 分区，`/system/system_ext` 只是指向它的符号链接。KernelSU 显示模块已挂载，但系统路径上的 jar 仍是原文件，哈希还是上面的备份值。必须在 `post-fs-data.sh` 里对这个文件做 bind。
+`/system_ext` 是独立的 erofs 分区，`/system/system_ext` 只是指向它的符号链接。`/system` 和 `/odm` 同样是 erofs。KernelSU 显示模块已挂载，但这些路径上的文件仍是原文件。必须在 `post-fs-data.sh` 里逐个 bind，不能在某一个已经绑上时提前退出。
 
 这台机器上 `system_server` 直接映射该 jar，不读单独的 odex。设备里没有 `/system/bin/odrefresh`，它在 `/apex/com.android.art/bin/odrefresh`。第一版脚本找不到 `/system/bin/odrefresh` 后把绑定卸掉了，所以重启后划卡仍是原版逻辑。绑定要留着，不要因为找不到 odrefresh 而 umount。
 
@@ -58,13 +82,13 @@ jar 被 `system_server` 映射之后，只改磁盘文件不会生效，需要�
 进不了系统时，在 Recovery 解密 data 后执行：
 
 ```sh
-adb shell touch /data/adb/modules/system-server/disable
+adb shell touch /data/adb/modules/services-jar/disable
 ```
 
 要删掉模块：
 
 ```sh
-adb shell rm -rf /data/adb/modules/system-server /data/adb/modules_update/system-server
+adb shell rm -rf /data/adb/modules/services-jar /data/adb/modules_update/services-jar
 ```
 
 ## 后续可能会加

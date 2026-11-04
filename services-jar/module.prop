@@ -1,0 +1,6 @@
+id=services-jar
+name=services-jar
+version=1.4
+versionCode=5
+author=local
+description=划卡强行停止与大陆版一致，并按大陆版收紧自启动：FCM、开机广播、Job、闹钟白名单不再因国际版放行。冻结策略固定走大陆版。人脸解锁成功时清掉超声波指纹的失败次数。

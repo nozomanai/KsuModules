@@ -1,6 +1,0 @@
-id=system-server
-name=划卡强行停止
-version=1.3
-versionCode=4
-author=local
-description=划卡强行停止与大陆版一致，并按大陆版收紧自启动：FCM、开机广播、Job、闹钟白名单不再因国际版放行。冻结策略固定走大陆版。
