@@ -67,7 +67,7 @@ SHA256 `41466bd4d48c1464abe6cca91a409543b823803104198e99390e66fa99ba6c4f`
 
 密码解开走另一条路。`BiometricDeferredQueue.processPendingLockoutsForFingerprint` 在传感器既要硬件令牌、又要 challenge 时，原来只打 `No fingerprint HAL interface requires HAT with challenge`，不调用 reset。现在这种传感器也向 Gatekeeper 要令牌再 `resetLockout`。不要令牌的传感器仍用空令牌，和原来一样。
 
-`services.jar` 的 smali 在 `D:\Phone\Mi15\modified\services`。只改了 `classes.dex` 和 `classes2.dex`，用 baksmali/smali 3.0.10 按 API 29 回编，魔数仍是 `dex 039`。原文件 SHA256 `3247e260f765dce05f5324e5106727314d22f691043643fd8b1fd15a136dc092`。模块内 `services.jar` SHA256 `131a03bf0319159f930e10b728d29f7e994dc6624fa5aaf12bebcaef0819e3a1`。
+`services.jar` 的 smali 在 `D:\Phone\Mi15\KsuModules\services-decompiled`。这是反编译产物，不是模块。只改了 `classes.dex` 和 `classes2.dex`，用 baksmali/smali 3.0.10 按 API 29 回编，魔数仍是 `dex 039`。原文件 SHA256 `3247e260f765dce05f5324e5106727314d22f691043643fd8b1fd15a136dc092`。模块内 `services.jar` SHA256 `131a03bf0319159f930e10b728d29f7e994dc6624fa5aaf12bebcaef0819e3a1`。
 
 原 `libqc_hal.so` SHA256 `4017b7d98119da8502c68f739e7d2e8df94dcb447c7de6a00d772f1eb62999ff`。模块内 SHA256 `282d6745de4763443f977ffc6c6f8e1966393ab5b7c517f41f4499b07070a103`。
 
