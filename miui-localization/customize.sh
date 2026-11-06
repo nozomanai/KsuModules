@@ -95,4 +95,7 @@ skip_if_installed com.miui.voiceassistoverlay \
   "$MODPATH/system/product/overlay/VoiceAssistAndroidOverlay" \
   ""
 
+log_msg "keep package=com.miui.weather2 path=system/product/priv-app/Weather reason=always-overlay"
+log_msg "keep package=com.android.calendar path=system/product/priv-app/Calendar reason=always-overlay"
+
 log_msg "install end"

@@ -2,7 +2,7 @@
 
 KernelSU 模块。替换 `/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk`，让熄屏按住指纹时，0.3 秒内没有解开就亮起锁屏。目标机型小米 15（dada），系统 `OS3.0.307.0.WOCCNXM`。SystemUI 版本 `16.03.251211.r`。
 
-模块内 APK SHA256 `afa77231151e3ba6f103cad256acb9cd1540c73785d71628ea1c2148d0fc18d0`
+模块内 APK SHA256 `558301abbaeb444f9f9da2449ab556ef98ee1c8dcd7df2ab6ec26fc77723f43d`
 
 ## 目前的功能
 
@@ -12,7 +12,7 @@ KernelSU 模块。替换 `/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk`，
 - 到 0.3 秒仍未解开，并且屏幕还不是亮屏：调用 `PowerManager.wakeUp()`，亮起锁屏。唤醒原因是 `WAKE_REASON_BIOMETRIC`（16），详情字符串是 `com.android.systemui:FOD_TIMEOUT`。
 - 屏幕已经亮着时按指纹：不挂这个计时，亮屏解锁行为保持原样。
 
-再次按下会把上一次还没到点的计时清掉，从这次按下重新算 0.3 秒。手指提前松开不会取消计时，只要到点还没解开就会亮屏。
+再次按下会把上一次还没到点的计时清掉，从这次按下重新算 0.3 秒。0.3 秒内抬起手指会取消这次计时，屏幕不会因此亮起。一直按住超过 0.3 秒且还没解开，到点仍会亮屏。
 
 ## 改了什么
 
@@ -22,7 +22,8 @@ KernelSU 模块。替换 `/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk`，
 
 - `onTouchDown()` 在 `turnOnAodIfScreenOff()` 之后调用新增的 `scheduleWakeIfNotUnlocked()`。已经处于按下状态时的提前返回没有改，同一次按住不会重复计时。
 - 新增 `scheduleWakeIfNotUnlocked()`。只有 `mDozing` 为真才向 `mHandler` 投递 300 毫秒延时任务，日志标签 `MiuiGxzwViewIcon`，内容 `scheduleWakeIfNotUnlocked 300ms`。
-- 新增字段 `mWakeIfNotUnlocked`，保存下面这个任务，便于下次按下时 `removeCallbacks`。
+- `onTouchUp()` 一开始调用 `cancelWakeIfNotUnlocked()`，对同一个 `mHandler` 执行 `removeCallbacks`。没有挂过计时，或任务对象还是空时直接返回。
+- 新增字段 `mWakeIfNotUnlocked`，保存这个任务，供抬手取消和下一次按下重计时。
 
 新增 `com.miui.keyguard.biometrics.fod.MiuiGxzwIconView$WakeIfNotUnlocked`，到点后依次判断：
 

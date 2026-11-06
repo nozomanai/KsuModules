@@ -30,6 +30,8 @@ install_if_needed() {
 
 install_if_needed com.android.quicksearchbox
 install_if_needed com.miui.voiceassist
+install_if_needed com.miui.weather2
+install_if_needed com.android.calendar
 install_if_needed com.miui.voicetrigger
 install_if_needed com.xiaomi.mibrain.speech
 install_if_needed com.xiaomi.aiasst.service
