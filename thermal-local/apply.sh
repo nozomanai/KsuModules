@@ -98,6 +98,7 @@ fi
 
 mkdir -p "$GEN"
 log "apply mode=$MODE"
+sh "$MODDIR/boost.sh" >> "$LOG" 2>&1 || log "boost overlay failed"
 
 apply_scene_maps() {
   assign="$MODDIR/scene-map.txt"

@@ -1,5 +1,6 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
+sh "$MODDIR/boost.sh" >/dev/null 2>&1 || true
 GEN="$MODDIR/generated"
 DEST=/data/vendor/thermal/config
 MODE=$(cat "$MODDIR/mode" 2>/dev/null)

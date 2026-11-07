@@ -1,4 +1,5 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
+import { mountBoost } from "./boost.js?v=freq1";
 
 const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
 
@@ -9,6 +10,7 @@ function remoteOpForPath(path) {
   if (path.endsWith("/scene-map.txt")) return "scenemap";
   if (path.endsWith("/setting.xml")) return "setting";
   if (path.endsWith("/stock-map.txt")) return "stockmap";
+  if (path.endsWith("/boost.xml")) return "boost";
   return "";
 }
 
@@ -153,7 +155,7 @@ function fieldLabel(key, kind) {
   if (key === "trig") return kind === "temp" ? "触发 °C" : "触发";
   if (key === "clr") return kind === "temp" ? "恢复 °C" : "恢复";
   if (key === "target" && kind === "temp") return "目标 °C";
-  if (key === "target" && kind === "hz") return "频率 Hz";
+  if (key === "target" && kind === "hz") return "频率";
   if (key === "target") return "目标";
   if (key === "max") return "上限 mA";
   if (key === "min") return "下限 mA";
@@ -227,11 +229,16 @@ function nearestFreq(device, hz) {
   return table.reduce((best, item) => Math.abs(item - hz) < Math.abs(best - hz) ? item : best, table[0]);
 }
 
+function setCurveInput(card, key, index, value) {
+  const input = card.querySelector('[data-key="' + key + '"][data-index="' + index + '"]');
+  if (input) input.value = String(value);
+}
+
 function curveLevels(card) {
   return Array.from(card.querySelectorAll('input[data-key="trig"]')).map((input) => {
     const index = input.dataset.index;
     const clr = card.querySelector('input[data-key="clr"][data-index="' + index + '"]');
-    const target = card.querySelector('input[data-key="target"][data-index="' + index + '"]');
+    const target = card.querySelector('[data-key="target"][data-index="' + index + '"]');
     return {
       index,
       trig: Number(input.value),
@@ -241,9 +248,30 @@ function curveLevels(card) {
   }).filter((point) => Number.isFinite(point.trig) && Number.isFinite(point.hz));
 }
 
-function setCurveInput(card, key, index, value) {
-  const input = card.querySelector('input[data-key="' + key + '"][data-index="' + index + '"]');
-  if (input) input.value = String(value);
+function freqChoices(device, current) {
+  const values = (freqTables[device] || []).map((item) => String(item));
+  const text = String(current || "").trim();
+  if (text && values.indexOf(text) < 0) values.push(text);
+  values.sort((a, b) => Number(a) - Number(b));
+  return values;
+}
+
+function freqOptionLabel(hz) {
+  const value = Number(hz);
+  if (!Number.isFinite(value)) return String(hz);
+  return (value / 1000000).toFixed(2) + " GHz";
+}
+
+function freqSelect(device, current) {
+  const select = document.createElement("select");
+  for (const hz of freqChoices(device, current)) {
+    const option = document.createElement("option");
+    option.value = hz;
+    option.textContent = freqOptionLabel(hz);
+    select.appendChild(option);
+  }
+  select.value = String(current || "");
+  return select;
 }
 
 const CURVE_W = 360;
@@ -576,10 +604,12 @@ function attachCurve(card, device) {
       zoomAt(factor, (range.minT + range.maxT) / 2);
     });
   }
-  card.addEventListener("input", (event) => {
+  const onCurveEdit = (event) => {
     const key = event.target.dataset && event.target.dataset.key;
     if (key === "trig" || key === "clr" || key === "target") paint();
-  });
+  };
+  card.addEventListener("input", onCurveEdit);
+  card.addEventListener("change", onCurveEdit);
   paint();
 }
 
@@ -734,15 +764,17 @@ function fillProfile(root, parsed) {
           wrap.className = "field";
           const caption = document.createElement("span");
           caption.textContent = fieldLabel(key, valueKind);
-          const input = document.createElement("input");
-          input.inputMode = valueKind === "temp" ? "decimal" : "numeric";
-          input.value = displayValue(section.fields[key][i] || "", valueKind);
-          input.dataset.sec = section.name;
-          input.dataset.key = key;
-          input.dataset.index = String(i);
-          input.dataset.kind = valueKind;
+          const control = valueKind === "hz" ? freqSelect(device, section.fields[key][i] || "") : document.createElement("input");
+          if (valueKind !== "hz") {
+            control.inputMode = valueKind === "temp" ? "decimal" : "numeric";
+            control.value = displayValue(section.fields[key][i] || "", valueKind);
+          }
+          control.dataset.sec = section.name;
+          control.dataset.key = key;
+          control.dataset.index = String(i);
+          control.dataset.kind = valueKind;
           wrap.appendChild(caption);
-          wrap.appendChild(input);
+          wrap.appendChild(control);
           row.appendChild(wrap);
         }
         list.appendChild(row);
@@ -817,7 +849,8 @@ function collect() {
 function collectFrom(root, parsed) {
   const next = parseProfile(serialize(parsed));
   const byName = new Map(next.sections.map((section) => [section.name, section]));
-  for (const input of root.querySelectorAll("input")) {
+  for (const input of root.querySelectorAll("input, select")) {
+    if (!input.dataset.sec) continue;
     const section = byName.get(input.dataset.sec);
     const values = section.fields[input.dataset.key];
     values[Number(input.dataset.index)] = storedValue(input.value, input.dataset.kind);
@@ -1521,14 +1554,28 @@ function confNameOk(name) {
   return /^thermal-[A-Za-z0-9._-]+\.conf$/.test(name) && name.indexOf("..") < 0;
 }
 
+const openBoost = mountBoost({
+  hasKsu,
+  exec,
+  apiGet,
+  apiPost,
+  writeFile,
+  toast,
+  dir: () => dir,
+  freqs: (device) => freqTables[device] || [],
+});
+
 function showPage(page) {
-  const files = page === "files";
-  document.getElementById("page-control").hidden = files;
-  document.getElementById("control-head").hidden = files;
-  document.getElementById("page-files").hidden = !files;
-  document.getElementById("tab-control").classList.toggle("on", !files);
-  document.getElementById("tab-files").classList.toggle("on", files);
-  if (files && !filesLoaded) loadFileList();
+  document.getElementById("page-control").hidden = page !== "control";
+  document.getElementById("page-files").hidden = page !== "files";
+  document.getElementById("page-boost").hidden = page !== "boost";
+  document.getElementById("control-head").hidden = page !== "control";
+  document.getElementById("boost-bar").hidden = page !== "boost";
+  document.getElementById("tab-control").classList.toggle("on", page === "control");
+  document.getElementById("tab-files").classList.toggle("on", page === "files");
+  document.getElementById("tab-boost").classList.toggle("on", page === "boost");
+  if (page === "files" && !filesLoaded) loadFileList();
+  if (page === "boost") openBoost();
 }
 
 async function listConfText() {
@@ -1849,6 +1896,7 @@ async function saveEditor() {
 
 document.getElementById("tab-control").addEventListener("click", () => showPage("control"));
 document.getElementById("tab-files").addEventListener("click", () => showPage("files"));
+document.getElementById("tab-boost").addEventListener("click", () => showPage("boost"));
 document.getElementById("file-filter").addEventListener("input", () => {
   if (filesLoaded) renderFileList();
 });

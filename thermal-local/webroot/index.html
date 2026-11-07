@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>本机温控</title>
-  <link rel="stylesheet" href="app.css?v=curve-zoom2">
+  <link rel="stylesheet" href="app.css?v=freq1">
 </head>
 <body>
   <header>
@@ -15,6 +15,7 @@
     </div>
     <div class="menu-tabs">
       <button id="tab-control" class="tab on" type="button">控制</button>
+      <button id="tab-boost" class="tab" type="button">升频</button>
       <button id="tab-files" class="tab" type="button">配置</button>
     </div>
   </nav>
@@ -55,6 +56,20 @@
       </div>
     </div>
   </div>
+  <div id="boost-bar" class="boost-bar" hidden>
+    <div id="boost-current" class="boost-current" hidden>
+      <span>当前档位</span>
+      <strong id="boost-current-name"></strong>
+    </div>
+    <label>
+      编辑这一列
+      <select id="boost-power">
+        <option value="0">性能</option>
+        <option value="1">均衡</option>
+        <option value="2">省电</option>
+      </select>
+    </label>
+  </div>
   </header>
   <div id="page-control">
   <div class="toolbar">
@@ -74,6 +89,18 @@
   </section>
   <main id="cards"></main>
   </div>
+  <section id="page-boost" hidden>
+    <div class="toolbar">
+      <button id="boost-reload" type="button">重新读取</button>
+      <button id="boost-defaults" type="button">载入初始值</button>
+      <button id="boost-save" type="button" class="primary">保存并应用</button>
+    </div>
+    <div class="boost-body">
+      <p class="note">滑动和启动时的临时频率上限。到达某一档的温度后用这一档，直到下一档；低于第一档时，这张表不限制升频。性能、均衡、省电是三列。关闭覆盖后这张表也撤掉。</p>
+      <p id="boost-status" class="hint">正在读取升频表</p>
+      <div id="boost-cards"></div>
+    </div>
+  </section>
   <section id="page-files" hidden>
     <p class="note">点一个温控文件可以查看和修改。也可以拿现有文件当模板，新建一份并取名。新建和改过的明文保存在内部存储的 thermal-local/configs。新建的文件可以在控制页的动态场景里选用。原厂文件不能删除，只能去掉自己做过的覆盖。</p>
     <div class="file-create">
@@ -98,6 +125,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=curve-zoom2"></script>
+  <script type="module" src="app.js?v=freq1"></script>
 </body>
 </html>

@@ -97,6 +97,46 @@ case "$op" in
       cat "$MOD/mode" 2>/dev/null || true
     fi
     ;;
+  boost|boostdefault)
+    target="$MOD/boost.xml"
+    if [ "$op" = "boostdefault" ]; then
+      target="$MOD/boost.default.xml"
+    fi
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      if [ "$op" != "boost" ]; then
+        fail 405 "read only"
+      fi
+      read_body > "$target.tmp"
+      mv -f "$target.tmp" "$target"
+      ok
+      printf 'ok\n'
+    else
+      if [ ! -s "$target" ] && [ "$op" = "boost" ]; then
+        target="$MOD/boost.default.xml"
+      fi
+      if [ ! -f "$target" ]; then
+        fail 404 "missing"
+      fi
+      ok
+      cat "$target"
+    fi
+    ;;
+  balance)
+    ok
+    settings get system power_mode_level 2>/dev/null
+    printf '\n'
+    ;;
+  boostapply)
+    result=$(sh "$MOD/boost.sh" 2>&1)
+    code=$?
+    printf '%s\n' "$result" >> "$LOG"
+    if [ "$code" != 0 ]; then
+      header 500
+    else
+      ok
+    fi
+    printf '%s\n' "$result"
+    ;;
   profile|profiledefault)
     target="$MOD/profile.conf"
     if [ "$op" = "profiledefault" ]; then
