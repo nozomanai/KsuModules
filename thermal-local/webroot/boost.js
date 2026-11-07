@@ -203,37 +203,9 @@ export function mountBoost(api) {
     return result.stdout;
   }
 
-  async function readBalance() {
-    // 系统设置 power_mode_level：0 均衡，1 性能，2 省电。
-    // 升频表的列是 Target0 性能、Target1 均衡、Target2 省电。
-    try {
-      const text = api.hasKsu
-        ? (await api.exec("settings get system power_mode_level")).stdout
-        : await api.apiGet("balance");
-      const level = Number(String(text).trim());
-      if (level === 0) return 1;
-      if (level === 1) return 0;
-      if (level === 2) return 2;
-    } catch (error) {}
-    return null;
-  }
-
-  function showCurrent(balance) {
-    const box = document.getElementById("boost-current");
-    if (balance == null) {
-      box.hidden = true;
-      return;
-    }
-    document.getElementById("boost-current-name").textContent = BOOST_MODES[balance];
-    box.hidden = false;
-    power.value = String(balance);
-  }
-
   async function load(kind) {
     setBusy(true);
     try {
-      const balance = await readBalance();
-      showCurrent(balance);
       configs = parseBoost(await readText(kind));
       loaded = true;
       render();

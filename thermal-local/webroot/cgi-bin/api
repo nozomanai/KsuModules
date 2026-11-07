@@ -121,11 +121,6 @@ case "$op" in
       cat "$target"
     fi
     ;;
-  balance)
-    ok
-    settings get system power_mode_level 2>/dev/null
-    printf '\n'
-    ;;
   boostapply)
     result=$(sh "$MOD/boost.sh" 2>&1)
     code=$?

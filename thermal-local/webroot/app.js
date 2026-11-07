@@ -1,5 +1,5 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
-import { mountBoost } from "./boost.js?v=freq1";
+import { mountBoost } from "./boost.js?v=freq2";
 
 const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
 

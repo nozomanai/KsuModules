@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>本机温控</title>
-  <link rel="stylesheet" href="app.css?v=freq1">
+  <link rel="stylesheet" href="app.css?v=freq2">
 </head>
 <body>
   <header>
@@ -57,15 +57,11 @@
     </div>
   </div>
   <div id="boost-bar" class="boost-bar" hidden>
-    <div id="boost-current" class="boost-current" hidden>
-      <span>当前档位</span>
-      <strong id="boost-current-name"></strong>
-    </div>
     <label>
       编辑这一列
       <select id="boost-power">
         <option value="0">性能</option>
-        <option value="1">均衡</option>
+        <option value="1" selected>均衡</option>
         <option value="2">省电</option>
       </select>
     </label>
@@ -125,6 +121,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=freq1"></script>
+  <script type="module" src="app.js?v=freq2"></script>
 </body>
 </html>

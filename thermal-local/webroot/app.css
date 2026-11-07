@@ -36,23 +36,6 @@ body {
 
 .boost-bar label { min-width: 148px; }
 
-.boost-current {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.boost-current span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.boost-current strong {
-  font-size: 18px;
-  font-weight: 650;
-}
-
 .menubar {
   display: flex;
   align-items: center;
