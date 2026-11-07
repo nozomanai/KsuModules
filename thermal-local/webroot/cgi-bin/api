@@ -1,0 +1,139 @@
+#!/system/bin/sh
+export PATH=/system/bin:/system/xbin:/vendor/bin:/data/adb/ksu/bin:$PATH
+MOD=/data/adb/modules/thermal-local
+LOG=/data/adb/thermal-local.log
+op=${QUERY_STRING#op=}
+op=${op%%&*}
+
+header() {
+  printf 'Status: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n' "$1"
+}
+
+ok() {
+  header 200
+}
+
+fail() {
+  header "$1"
+  printf '%s\n' "$2"
+  exit 0
+}
+
+read_body() {
+  n=${CONTENT_LENGTH:-0}
+  case "$n" in
+    ''|*[!0-9]*) n=0 ;;
+  esac
+  if [ "$n" -gt 262144 ]; then
+    fail 413 "body too large"
+  fi
+  if [ "$n" -eq 0 ]; then
+    return 0
+  fi
+  dd bs="$n" count=1 2>/dev/null
+}
+
+case "$op" in
+  mode)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/mode.tmp"
+      body=$(tr -d '\r\n' < "$MOD/mode.tmp")
+      case "$body" in
+        all|normal|scene|off) ;;
+        *) fail 400 "bad mode" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/mode"
+      rm -f "$MOD/mode.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      cat "$MOD/mode" 2>/dev/null || true
+    fi
+    ;;
+  profile|profiledefault)
+    target="$MOD/profile.conf"
+    if [ "$op" = "profiledefault" ]; then
+      target="$MOD/profile.default"
+    fi
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      if [ "$op" != "profile" ]; then
+        fail 405 "read only"
+      fi
+      read_body > "$target.tmp"
+      mv -f "$target.tmp" "$target"
+      ok
+      printf 'ok\n'
+    else
+      if [ ! -f "$target" ]; then
+        fail 404 "missing"
+      fi
+      ok
+      cat "$target"
+    fi
+    ;;
+  scenemap)
+    target="$MOD/scene-map.txt"
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$target.tmp"
+      mv -f "$target.tmp" "$target"
+      ok
+      printf 'ok\n'
+    else
+      if [ ! -s "$target" ]; then
+        fail 404 "missing"
+      fi
+      ok
+      cat "$target"
+    fi
+    ;;
+  setting)
+    ok
+    cat /odm/etc/setting.xml
+    ;;
+  stockmap)
+    mkdir -p "$MOD/generated"
+    out="$MOD/generated/stock-map.txt"
+    CLASSPATH="$MOD/thermal-crypt.dex" /system/bin/app_process /system/bin ThermalCrypt d /vendor/etc/thermal-map.conf "$out" >/dev/null 2>&1
+    if [ ! -s "$out" ]; then
+      fail 500 "decrypt failed"
+    fi
+    ok
+    cat "$out"
+    ;;
+  files)
+    ok
+    ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf 2>/dev/null
+    ;;
+  sconfig)
+    ok
+    cat /sys/class/thermal/thermal_message/sconfig 2>/dev/null
+    printf '\n'
+    ;;
+  urls)
+    ok
+    sh "$MOD/remote.sh" status
+    ;;
+  log)
+    ok
+    tail -n 8 "$LOG" 2>/dev/null || true
+    ;;
+  apply)
+    sh "$MOD/apply.sh" >/dev/null 2>&1
+    code=$?
+    if [ "$code" != 0 ]; then
+      header 500
+    else
+      ok
+    fi
+    tail -n 8 "$LOG" 2>/dev/null || true
+    ;;
+  stop)
+    ok
+    printf 'closed\n'
+    (sleep 1; sh "$MOD/remote.sh" stop) >/dev/null 2>&1 &
+    ;;
+  *)
+    fail 404 "unknown op"
+    ;;
+esac

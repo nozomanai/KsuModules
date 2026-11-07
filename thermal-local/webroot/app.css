@@ -162,7 +162,13 @@ details {
   font-size: 13px;
 }
 
-#scenes { padding: 0 16px 16px; }
+#remote-box {
+  padding: 0 16px 4px;
+}
+
+#remote-url {
+  white-space: pre-wrap;
+}
 
 #scene-filter {
   width: 100%;

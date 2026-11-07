@@ -30,9 +30,12 @@ export function exec(command, options) {
 }
 
 export function toast(message) {
-  bridge().toast(message);
+  const ksu = globalThis.ksu;
+  if (ksu && typeof ksu.toast === "function") ksu.toast(message);
 }
 
 export function moduleInfo() {
-  return bridge().moduleInfo();
+  const ksu = globalThis.ksu;
+  if (!ksu || typeof ksu.moduleInfo !== "function") return "";
+  return ksu.moduleInfo();
 }

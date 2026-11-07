@@ -1,5 +1,34 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
 
+const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
+
+function remoteOpForPath(path) {
+  if (path.endsWith("/profile.conf")) return "profile";
+  if (path.endsWith("/profile.default")) return "profiledefault";
+  if (path.endsWith("/mode")) return "mode";
+  if (path.endsWith("/scene-map.txt")) return "scenemap";
+  if (path.endsWith("/setting.xml")) return "setting";
+  if (path.endsWith("/stock-map.txt")) return "stockmap";
+  return "";
+}
+
+async function apiGet(op) {
+  const response = await fetch("/cgi-bin/api?op=" + encodeURIComponent(op));
+  const text = await response.text();
+  if (!response.ok) throw new Error(text.trim() || "读取失败");
+  return text;
+}
+
+async function apiPost(op, body) {
+  const response = await fetch("/cgi-bin/api?op=" + encodeURIComponent(op), {
+    method: "POST",
+    body: body == null ? "" : body,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(text.trim() || "请求失败");
+  return text;
+}
+
 const TITLES = {
   "SS-CPU0": "小核",
   "SS-CPU6": "大核",
@@ -300,6 +329,12 @@ function toBase64(text) {
 }
 
 async function writeFile(path, text) {
+  if (!hasKsu) {
+    const op = remoteOpForPath(path);
+    if (!op) throw new Error("不支持写入");
+    await apiPost(op, text);
+    return;
+  }
   const encoded = toBase64(text);
   const result = await exec("printf '%s' '" + encoded + "' | base64 -d > '" + path + ".tmp' && mv -f '" + path + ".tmp' '" + path + "'");
   if (result.errno !== 0) {
@@ -308,6 +343,11 @@ async function writeFile(path, text) {
 }
 
 async function readFile(path) {
+  if (!hasKsu) {
+    const op = remoteOpForPath(path);
+    if (!op) throw new Error("不支持读取");
+    return apiGet(op);
+  }
   const result = await exec("cat '" + path + "'");
   if (result.errno !== 0) throw new Error(result.stderr || "读取失败");
   return result.stdout;
@@ -499,7 +539,15 @@ function markActiveScene() {
   }
 }
 
+async function readSconfig() {
+  if (!hasKsu) return (await apiGet("sconfig")).trim();
+  const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
+  if (now.errno !== 0) return "";
+  return now.stdout.trim();
+}
+
 async function decryptStockMap() {
+  if (!hasKsu) return apiGet("stockmap");
   const out = dir + "/generated/stock-map.txt";
   const result = await exec("mkdir -p '" + dir + "/generated'; CLASSPATH='" + dir + "/thermal-crypt.dex' /system/bin/app_process /system/bin ThermalCrypt d /vendor/etc/thermal-map.conf '" + out + "'");
   if (result.errno !== 0) throw new Error(result.stderr || "场景表解密失败");
@@ -508,21 +556,33 @@ async function decryptStockMap() {
 
 async function loadScenes() {
   const xml = await readFile("/odm/etc/setting.xml");
-  const listed = await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf");
+  const listed = hasKsu
+    ? await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf")
+    : { errno: 0, stdout: await apiGet("files") };
   if (listed.errno !== 0) throw new Error(listed.stderr || "读取温控文件失败");
   sceneFiles = Array.from(new Set(listed.stdout.split("\n").map((line) => line.trim().split("/").pop()).filter((name) => name && !name.includes("map")))).sort();
   stockAssign = parseMap(await decryptStockMap());
   let chosen = new Map();
-  const saved = await exec("cat '" + dir + "/scene-map.txt'");
-  if (saved.errno === 0) chosen = parseMap(saved.stdout);
+  let savedText = "";
+  if (hasKsu) {
+    const saved = await exec("cat '" + dir + "/scene-map.txt'");
+    if (saved.errno === 0) savedText = saved.stdout;
+  } else {
+    try {
+      savedText = await apiGet("scenemap");
+    } catch (error) {
+      savedText = "";
+    }
+  }
+  if (savedText) chosen = parseMap(savedText);
   sceneRows = parseScenes(xml).map((row) => ({
     id: row.id,
     names: row.names,
     hint: row.hint,
     chosen: chosen.get(row.id) || stockAssign.get(row.id) || "",
   }));
-  const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
-  activeScene = now.errno === 0 ? now.stdout.trim() : "";
+  const now = await readSconfig();
+  activeScene = now;
   renderScenes();
 }
 
@@ -568,14 +628,20 @@ async function save() {
     if (modeEl.value === "scene") await saveScenes();
     else await saveCurves();
     await writeFile(dir + "/mode", modeEl.value + "\n");
-    const result = await exec("sh '" + dir + "/apply.sh'");
-    if (result.errno !== 0) {
-      const log = await exec("tail -n 8 /data/adb/thermal-local.log");
-      throw new Error((log.stdout || result.stderr || "应用失败").trim());
+    if (!hasKsu) {
+      const log = await apiPost("apply", "");
+      if (!log.includes("apply done") && !log.includes("overlays removed")) {
+        throw new Error(log.trim() || "应用失败");
+      }
+    } else {
+      const result = await exec("sh '" + dir + "/apply.sh'");
+      if (result.errno !== 0) {
+        const log = await exec("tail -n 8 /data/adb/thermal-local.log");
+        throw new Error((log.stdout || result.stderr || "应用失败").trim());
+      }
     }
     if (modeEl.value === "scene") {
-      const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
-      activeScene = now.errno === 0 ? now.stdout.trim() : activeScene;
+      activeScene = await readSconfig();
       markActiveScene();
     }
     setStatus("已应用，温控进程已重启");
@@ -630,13 +696,49 @@ document.getElementById("scene-filter").addEventListener("input", () => {
 });
 setInterval(async () => {
   if (modeEl.value !== "scene" || document.getElementById("scenes").hidden) return;
-  const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
-  if (now.errno !== 0) return;
-  const next = now.stdout.trim();
-  if (next === activeScene) return;
+  const next = await readSconfig();
+  if (!next || next === activeScene) return;
   activeScene = next;
   markActiveScene();
   setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + activeScene);
 }, 2000);
+
+async function refreshRemote() {
+  const button = document.getElementById("remote-toggle");
+  const url = document.getElementById("remote-url");
+  if (!hasKsu) {
+    button.textContent = "关闭远程访问";
+    url.textContent = location.origin + "/";
+    return;
+  }
+  const result = await exec("sh '" + dir + "/remote.sh' status");
+  const text = result.errno === 0 ? result.stdout.trim() : "stopped";
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const on = lines[0] === "running";
+  button.textContent = on ? "关闭远程访问" : "开启远程访问";
+  url.textContent = on ? lines.slice(1).join("\n") : "关闭时只有手机上的 KernelSU 能打开这个页面";
+}
+
+document.getElementById("remote-toggle").addEventListener("click", async () => {
+  const button = document.getElementById("remote-toggle");
+  button.disabled = true;
+  try {
+    if (!hasKsu) {
+      await apiPost("stop", "");
+      setStatus("远程访问已关闭");
+      document.getElementById("remote-url").textContent = "已关闭";
+      return;
+    }
+    const action = button.textContent.indexOf("关闭") === 0 ? "stop" : "start";
+    const result = await exec("sh '" + dir + "/remote.sh' " + action);
+    if (result.errno !== 0) throw new Error((result.stderr || result.stdout || "远程访问切换失败").trim());
+    await refreshRemote();
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 saveEl.addEventListener("click", save);
-refresh();
+refresh().then(refreshRemote);

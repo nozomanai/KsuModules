@@ -9,3 +9,6 @@ while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
   sleep 1
 done
 sh "$MODDIR/apply.sh"
+if [ -f "$MODDIR/remote.on" ]; then
+  sh "$MODDIR/remote.sh" start
+fi
