@@ -8,19 +8,41 @@
 </head>
 <body>
   <header>
-    <div>
-      <h1>本机温控</h1>
-      <p id="status">正在读取策略</p>
+    <div class="head-top">
+      <div>
+        <h1>本机温控</h1>
+        <p id="status">正在读取策略</p>
+      </div>
+      <div id="link" class="link" hidden>
+        <span class="dot"></span>
+        <span id="link-text">正在连接</span>
+      </div>
+      <label>
+        作用范围
+        <select id="mode">
+          <option value="all">所有场景</option>
+          <option value="normal">仅普通场景</option>
+          <option value="scene">动态场景</option>
+          <option value="off">关闭覆盖</option>
+        </select>
+      </label>
     </div>
-    <label>
-      作用范围
-      <select id="mode">
-        <option value="all">所有场景</option>
-        <option value="normal">仅普通场景</option>
-        <option value="scene">动态场景</option>
-        <option value="off">关闭覆盖</option>
-      </select>
-    </label>
+    <div id="live" class="livebar wait" aria-live="polite">
+      <div class="live-row">
+        <span class="live-k"><span class="dot"></span>当前场景</span>
+        <div>
+          <strong id="live-scene">读取中</strong>
+          <em id="live-hint"></em>
+        </div>
+      </div>
+      <div class="live-row">
+        <span class="live-k">激活温控</span>
+        <div>
+          <strong id="live-file">读取中</strong>
+          <em id="live-note"></em>
+        </div>
+      </div>
+    </div>
   </header>
   <div class="toolbar">
     <button id="reload" type="button">重新读取</button>
@@ -32,11 +54,12 @@
     <p id="remote-url" class="hint"></p>
   </section>
   <section id="scenes" hidden>
-    <p class="note">每个场景号指定一份原厂温控文件。系统仍按前台状态切换场景号，当前场景和它正在使用的文件会高亮。</p>
+    <p class="note">每个场景号指定一份原厂温控文件。系统仍按前台状态切换场景号，顶部显示正在生效的那一份，列表里的当前场景也会高亮。</p>
+    <button id="demo-toggle" type="button">显示演示机配置</button>
     <input id="scene-filter" type="search" placeholder="筛选场景或文件">
     <div id="scene-list"></div>
   </section>
   <main id="cards"></main>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=demo"></script>
 </body>
 </html>

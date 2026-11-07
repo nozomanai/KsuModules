@@ -33,6 +33,41 @@ read_body() {
   dd bs="$n" count=1 2>/dev/null
 }
 
+variant_name() {
+  region=$(getprop ro.miui.region 2>/dev/null | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+  hwc=$(getprop ro.boot.hwc 2>/dev/null | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+  case "$hwc" in
+    IN|INDIA|*INDIA*) printf '%s\n' ind; return ;;
+  esac
+  case "$region" in
+    IN|INDIA|*INDIA*) printf '%s\n' ind; return ;;
+    CN|"")
+      case "$hwc" in
+        ""|CN) printf '%s\n' cn ;;
+        *) printf '%s\n' gl ;;
+      esac
+      ;;
+    *) printf '%s\n' gl ;;
+  esac
+}
+
+map_path() {
+  case "$1" in
+    gl) printf '%s\n' /odm/etc/thermal-map-gl.conf ;;
+    ind) printf '%s\n' /odm/etc/thermal-map-ind.conf ;;
+    *) printf '%s\n' /vendor/etc/thermal-map.conf ;;
+  esac
+}
+
+effective_variant() {
+  v=$(variant_name)
+  src=$(map_path "$v")
+  if [ ! -f "$src" ]; then
+    v=cn
+  fi
+  printf '%s\n' "$v"
+}
+
 case "$op" in
   mode)
     if [ "$REQUEST_METHOD" = "POST" ]; then
@@ -92,18 +127,28 @@ case "$op" in
     cat /odm/etc/setting.xml
     ;;
   stockmap)
+    v=$(effective_variant)
+    src=$(map_path "$v")
     mkdir -p "$MOD/generated"
     out="$MOD/generated/stock-map.txt"
-    CLASSPATH="$MOD/thermal-crypt.dex" /system/bin/app_process /system/bin ThermalCrypt d /vendor/etc/thermal-map.conf "$out" >/dev/null 2>&1
+    CLASSPATH="$MOD/thermal-crypt.dex" /system/bin/app_process /system/bin ThermalCrypt d "$src" "$out" >/dev/null 2>&1
     if [ ! -s "$out" ]; then
       fail 500 "decrypt failed"
     fi
     ok
     cat "$out"
     ;;
+  variant)
+    ok
+    effective_variant
+    ;;
   files)
     ok
     ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf 2>/dev/null
+    ;;
+  ping)
+    ok
+    printf 'ok\n'
     ;;
   sconfig)
     ok

@@ -24,14 +24,106 @@ header, .toolbar, main {
 
 header {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   position: sticky;
   top: 0;
   background: var(--bg);
   z-index: 2;
   border-bottom: 1px solid var(--line);
+}
+
+.head-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.link .dot { background: var(--muted); }
+.link.ok { color: #7ddea5; }
+.link.ok .dot { background: #7ddea5; }
+.link.bad { color: var(--danger); }
+.link.bad .dot { background: var(--danger); }
+
+.livebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--card);
+  border-radius: 12px;
+}
+
+.live-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.live-k {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  padding-top: 3px;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #7ddea5;
+}
+
+.livebar.wait .dot { background: var(--muted); }
+.livebar.stale .dot { background: var(--danger); }
+
+.livebar strong {
+  display: block;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.livebar em {
+  display: -webkit-box;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+#live-file {
+  display: -webkit-box;
+  color: var(--accent);
+  white-space: normal;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 h1 {
@@ -168,6 +260,16 @@ details {
 
 #remote-url {
   white-space: pre-wrap;
+}
+
+#scenes {
+  padding: 0 16px 16px;
+}
+
+#demo-toggle {
+  width: 100%;
+  flex: none;
+  margin-bottom: 8px;
 }
 
 #scene-filter {

@@ -361,7 +361,9 @@ async function loadProfile(path) {
 
 async function loadMode() {
   const text = (await readFile(dir + "/mode")).trim();
-  modeEl.value = ["all", "normal", "scene", "off"].includes(text) ? text : "all";
+  const value = ["all", "normal", "scene", "off"].includes(text) ? text : "all";
+  modeEl.value = value;
+  appliedMode = value;
   showPanels();
 }
 
@@ -369,6 +371,29 @@ let stockAssign = new Map();
 let sceneFiles = [];
 let sceneRows = [];
 let activeScene = "";
+let sceneIndex = new Map();
+let savedAssign = new Map();
+let appliedMode = "all";
+let mapVariant = "cn";
+let liveError = "";
+let liveLoaded = false;
+let liveStale = false;
+
+const MAP_SRC = {
+  cn: "/vendor/etc/thermal-map.conf",
+  gl: "/odm/etc/thermal-map-gl.conf",
+  ind: "/odm/etc/thermal-map-ind.conf",
+};
+
+const VARIANT_LABEL = { cn: "国行", gl: "国际", ind: "印度" };
+
+const NORMAL_FILES = {
+  "thermal-normal.conf": true,
+  "thermal-gl-normal.conf": true,
+  "thermal-ind-normal.conf": true,
+};
+
+const VARIANT_SH = "region=$(getprop ro.miui.region 2>/dev/null | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'); hwc=$(getprop ro.boot.hwc 2>/dev/null | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]'); case \"$hwc\" in IN|INDIA|*INDIA*) echo ind; exit 0;; esac; case \"$region\" in IN|INDIA|*INDIA*) echo ind;; CN|\"\") case \"$hwc\" in \"\"|CN) echo cn;; *) echo gl;; esac;; *) echo gl;; esac";
 
 function showPanels() {
   const scene = modeEl.value === "scene";
@@ -461,9 +486,10 @@ function parseScenes(xml) {
   while (match) {
     const id = match[1];
     const raw = match[2];
-    if (!grouped.has(id)) grouped.set(id, { names: new Set(), hints: new Set() });
+    if (!grouped.has(id)) grouped.set(id, { names: new Set(), hints: new Set(), raws: [] });
     grouped.get(id).names.add(raw.split("~")[0]);
     grouped.get(id).hints.add(explainName(raw));
+    grouped.get(id).raws.push(raw);
     match = pattern.exec(xml);
   }
   return Array.from(grouped.entries())
@@ -471,21 +497,42 @@ function parseScenes(xml) {
       id,
       names: Array.from(item.names).sort(),
       hint: Array.from(item.hints).join("；"),
+      demo: item.raws.length > 0 && item.raws.every((raw) => /-demo$/.test(raw.trim())),
     }))
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
 
+let showDemo = false;
+
+function sceneQuery() {
+  return document.getElementById("scene-filter").value.trim().toLowerCase();
+}
+
+function sceneCardVisible(card) {
+  if (card.dataset.demo === "1" && !showDemo) return false;
+  const query = sceneQuery();
+  if (!query) return true;
+  const select = card.querySelector("select");
+  const text = ((card.dataset.find || "") + " " + (select ? select.value : "")).toLowerCase();
+  return text.includes(query);
+}
+
+function applySceneVisibility() {
+  for (const card of document.querySelectorAll(".scene-card")) {
+    card.hidden = !sceneCardVisible(card);
+  }
+}
+
 function renderScenes() {
   const list = document.getElementById("scene-list");
-  const query = document.getElementById("scene-filter").value.trim().toLowerCase();
   list.innerHTML = "";
   for (const row of sceneRows) {
     const chosen = row.chosen || stockAssign.get(row.id) || sceneFiles[0] || "";
-    const blob = (row.id + " " + row.names.join(" ") + " " + (row.hint || "") + " " + chosen).toLowerCase();
     const card = document.createElement("article");
     card.className = "card scene-card";
     card.dataset.id = row.id;
-    if (query && !blob.includes(query)) card.hidden = true;
+    card.dataset.demo = row.demo ? "1" : "0";
+    card.dataset.find = (row.id + " " + row.names.join(" ") + " " + (row.hint || "") + " " + chosen).toLowerCase();
     const heading = document.createElement("h2");
     heading.textContent = row.id + " " + (row.names[0] || "");
     card.appendChild(heading);
@@ -523,6 +570,7 @@ function renderScenes() {
       select.appendChild(option);
     }
     card.appendChild(select);
+    card.hidden = !sceneCardVisible(card);
     list.appendChild(card);
   }
   markActiveScene();
@@ -539,51 +587,184 @@ function markActiveScene() {
   }
 }
 
+function cleanSceneId(text) {
+  const line = String(text || "").replace(/^\uFEFF/, "").trim().split(/\r?\n/)[0].trim();
+  return /^\d+$/.test(line) ? line : "";
+}
+
 async function readSconfig() {
-  if (!hasKsu) return (await apiGet("sconfig")).trim();
+  if (!hasKsu) return cleanSceneId(await apiGet("sconfig"));
   const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
   if (now.errno !== 0) return "";
-  return now.stdout.trim();
+  return cleanSceneId(now.stdout);
+}
+
+async function readVariant() {
+  let variant = "cn";
+  if (!hasKsu) {
+    variant = (await apiGet("variant")).trim();
+  } else {
+    const result = await exec(VARIANT_SH);
+    if (result.errno !== 0) throw new Error((result.stderr || "读取机型版本失败").trim());
+    variant = result.stdout.trim();
+  }
+  if (variant !== "gl" && variant !== "ind") return "cn";
+  if (!hasKsu) return variant;
+  const check = await exec("[ -f '" + MAP_SRC[variant] + "' ]");
+  if (check.errno !== 0) return "cn";
+  return variant;
 }
 
 async function decryptStockMap() {
   if (!hasKsu) return apiGet("stockmap");
+  const src = MAP_SRC[mapVariant] || MAP_SRC.cn;
   const out = dir + "/generated/stock-map.txt";
-  const result = await exec("mkdir -p '" + dir + "/generated'; CLASSPATH='" + dir + "/thermal-crypt.dex' /system/bin/app_process /system/bin ThermalCrypt d /vendor/etc/thermal-map.conf '" + out + "'");
+  const result = await exec("mkdir -p '" + dir + "/generated'; CLASSPATH='" + dir + "/thermal-crypt.dex' /system/bin/app_process /system/bin ThermalCrypt d '" + src + "' '" + out + "'");
   if (result.errno !== 0) throw new Error(result.stderr || "场景表解密失败");
   return readFile(out);
 }
 
-async function loadScenes() {
-  const xml = await readFile("/odm/etc/setting.xml");
+async function readSavedAssign() {
+  try {
+    if (hasKsu) {
+      const saved = await exec("cat '" + dir + "/scene-map.txt'");
+      if (saved.errno !== 0) return new Map();
+      return parseMap(saved.stdout);
+    }
+    return parseMap(await apiGet("scenemap"));
+  } catch (error) {
+    return new Map();
+  }
+}
+
+async function loadCatalog() {
+  liveError = "";
+  const problems = [];
+  const xmlPromise = readFile("/odm/etc/setting.xml").then((xml) => parseScenes(xml)).catch((error) => {
+    problems.push(error.message);
+    return [];
+  });
+  const savedPromise = readSavedAssign();
+  const scenePromise = readSconfig().then((now) => now).catch((error) => {
+    problems.push(error.message);
+    return "";
+  });
+  try {
+    mapVariant = await readVariant();
+  } catch (error) {
+    mapVariant = "cn";
+    problems.push(error.message);
+  }
+  try {
+    stockAssign = parseMap(await decryptStockMap());
+  } catch (error) {
+    stockAssign = new Map();
+    problems.push(error.message);
+  }
+  const rows = await xmlPromise;
+  sceneIndex = new Map(rows.map((row) => [row.id, row]));
+  savedAssign = await savedPromise;
+  const now = await scenePromise;
+  if (now) {
+    activeScene = now;
+    liveStale = false;
+  } else {
+    liveStale = true;
+  }
+  liveError = problems.filter(Boolean).join("；");
+  liveLoaded = true;
+}
+
+async function loadSceneEditor() {
+  if (sceneIndex.size === 0) throw new Error(liveError || "读取场景说明失败");
+  if (stockAssign.size === 0) throw new Error(liveError || "场景表解密失败");
   const listed = hasKsu
     ? await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf")
     : { errno: 0, stdout: await apiGet("files") };
   if (listed.errno !== 0) throw new Error(listed.stderr || "读取温控文件失败");
   sceneFiles = Array.from(new Set(listed.stdout.split("\n").map((line) => line.trim().split("/").pop()).filter((name) => name && !name.includes("map")))).sort();
-  stockAssign = parseMap(await decryptStockMap());
-  let chosen = new Map();
-  let savedText = "";
-  if (hasKsu) {
-    const saved = await exec("cat '" + dir + "/scene-map.txt'");
-    if (saved.errno === 0) savedText = saved.stdout;
-  } else {
-    try {
-      savedText = await apiGet("scenemap");
-    } catch (error) {
-      savedText = "";
-    }
-  }
-  if (savedText) chosen = parseMap(savedText);
-  sceneRows = parseScenes(xml).map((row) => ({
+  sceneRows = Array.from(sceneIndex.values()).map((row) => ({
     id: row.id,
     names: row.names,
     hint: row.hint,
-    chosen: chosen.get(row.id) || stockAssign.get(row.id) || "",
+    demo: row.demo,
+    chosen: savedAssign.get(row.id) || stockAssign.get(row.id) || "",
   }));
-  const now = await readSconfig();
-  activeScene = now;
   renderScenes();
+}
+
+function variantLabel() {
+  return VARIANT_LABEL[mapVariant] || "国行";
+}
+
+function stockMiss(stock) {
+  if (stock) return null;
+  if (stockAssign.size === 0 && liveError) return { file: "", note: liveError };
+  return { file: "", note: variantLabel() + "场景表里没有这个场景" };
+}
+
+function resolveActive(sceneId) {
+  if (appliedMode === "all") {
+    return { file: "thermal-normal.conf", note: "所有场景都在用自定义曲线" };
+  }
+  if (!sceneId) return { file: "", note: liveError || "还没读到场景号" };
+  const stock = stockAssign.get(sceneId) || "";
+  if (appliedMode === "scene") {
+    const chosen = savedAssign.get(sceneId) || "";
+    if (chosen) return { file: chosen, note: "动态场景里为这个场景保存的文件" };
+    const missing = stockMiss(stock);
+    if (missing) return missing;
+    return { file: stock, note: "还没单独指定，沿用" + variantLabel() + "原厂对应" };
+  }
+  const missing = stockMiss(stock);
+  if (missing) return missing;
+  if (appliedMode === "off") {
+    return { file: stock, note: "覆盖已关闭，这是" + variantLabel() + "原厂文件" };
+  }
+  if (NORMAL_FILES[stock]) return { file: stock, note: "仅普通场景：这份文件已换成自定义曲线" };
+  return { file: stock, note: "仅普通场景：这个场景仍用原厂文件" };
+}
+
+function pendingSceneFile(sceneId) {
+  if (appliedMode !== "scene" || modeEl.value !== "scene" || !sceneId) return "";
+  for (const select of document.querySelectorAll("#scene-list select")) {
+    if (select.dataset.id === sceneId) return select.value;
+  }
+  return "";
+}
+
+function renderLive() {
+  const bar = document.getElementById("live");
+  const sceneEl = document.getElementById("live-scene");
+  const hintEl = document.getElementById("live-hint");
+  const fileEl = document.getElementById("live-file");
+  const noteEl = document.getElementById("live-note");
+  bar.classList.toggle("wait", !liveLoaded);
+  bar.classList.toggle("stale", liveStale);
+  if (!activeScene) {
+    sceneEl.textContent = liveLoaded ? "读不到" : "读取中";
+    hintEl.textContent = "";
+  } else {
+    const row = sceneIndex.get(activeScene);
+    sceneEl.textContent = row && row.names[0] ? activeScene + " " + row.names[0] : activeScene;
+    hintEl.textContent = row ? (row.names.length > 1 ? row.names.join("、") : (row.hint.split("；")[0] || "")) : "";
+  }
+  if (!liveLoaded) {
+    fileEl.textContent = "读取中";
+    noteEl.textContent = "";
+    return;
+  }
+  const resolved = resolveActive(activeScene);
+  fileEl.textContent = resolved.file || "没有对应文件";
+  let note = resolved.note;
+  if (modeEl.value !== appliedMode) {
+    note = note ? note + "。页面上的作用范围还没应用" : "页面上的作用范围还没应用";
+  }
+  const pending = pendingSceneFile(activeScene);
+  if (pending && pending !== resolved.file) {
+    note = note ? note + "。列表里的选择还没应用" : "列表里的选择还没应用";
+  }
+  noteEl.textContent = note;
 }
 
 async function refresh() {
@@ -592,9 +773,10 @@ async function refresh() {
   try {
     dir = moduleDir();
     await loadMode();
+    await loadCatalog();
     if (modeEl.value === "scene") {
-      await loadScenes();
-      setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + (activeScene || "未知"));
+      await loadSceneEditor();
+      setStatus("已读取 " + sceneRows.length + " 个场景");
     } else {
       await loadProfile(dir + "/profile.conf");
       setStatus("已读取 " + state.sections.length + " 段");
@@ -602,6 +784,7 @@ async function refresh() {
   } catch (error) {
     setStatus(error.message, true);
   } finally {
+    renderLive();
     setBusy(false);
   }
 }
@@ -640,10 +823,20 @@ async function save() {
         throw new Error((log.stdout || result.stderr || "应用失败").trim());
       }
     }
+    appliedMode = modeEl.value;
     if (modeEl.value === "scene") {
-      activeScene = await readSconfig();
-      markActiveScene();
+      savedAssign = new Map();
+      for (const select of document.querySelectorAll("#scene-list select")) {
+        if (select.value) savedAssign.set(select.dataset.id, select.value);
+      }
     }
+    const now = await readSconfig();
+    if (now) {
+      activeScene = now;
+      liveStale = false;
+    }
+    markActiveScene();
+    renderLive();
     setStatus("已应用，温控进程已重启");
     toast("温控策略已应用");
   } catch (error) {
@@ -661,6 +854,7 @@ document.querySelector("#defaults").addEventListener("click", async () => {
     if (modeEl.value === "scene") {
       sceneRows = sceneRows.map((row) => ({ ...row, chosen: stockAssign.get(row.id) || "" }));
       renderScenes();
+      renderLive();
       setStatus("已恢复原厂文件对应，还没有写入手机");
     } else {
       await loadProfile(dir + "/profile.default");
@@ -674,34 +868,56 @@ document.querySelector("#defaults").addEventListener("click", async () => {
 });
 modeEl.addEventListener("change", async () => {
   showPanels();
+  renderLive();
   if (modeEl.value === "scene" && sceneRows.length === 0) {
     setBusy(true);
     try {
-      await loadScenes();
-      setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + (activeScene || "未知"));
+      if (sceneIndex.size === 0 || stockAssign.size === 0) await loadCatalog();
+      await loadSceneEditor();
+      setStatus("已读取 " + sceneRows.length + " 个场景");
     } catch (error) {
       setStatus(error.message, true);
     } finally {
+      renderLive();
       setBusy(false);
     }
   }
 });
-document.getElementById("scene-filter").addEventListener("input", () => {
-  const query = document.getElementById("scene-filter").value.trim().toLowerCase();
-  for (const card of document.querySelectorAll(".scene-card")) {
-    const select = card.querySelector("select");
-    const text = (card.dataset.id + " " + card.innerText + " " + (select ? select.value : "")).toLowerCase();
-    card.hidden = query !== "" && !text.includes(query);
-  }
+document.getElementById("scene-list").addEventListener("change", () => {
+  renderLive();
 });
+document.getElementById("demo-toggle").addEventListener("click", () => {
+  showDemo = !showDemo;
+  const button = document.getElementById("demo-toggle");
+  button.textContent = showDemo ? "隐藏演示机配置" : "显示演示机配置";
+  applySceneVisibility();
+});
+document.getElementById("scene-filter").addEventListener("input", () => {
+  applySceneVisibility();
+});
+let pollBusy = false;
 setInterval(async () => {
-  if (modeEl.value !== "scene" || document.getElementById("scenes").hidden) return;
-  const next = await readSconfig();
-  if (!next || next === activeScene) return;
-  activeScene = next;
-  markActiveScene();
-  setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + activeScene);
-}, 2000);
+  if (pollBusy) return;
+  pollBusy = true;
+  try {
+    const next = await readSconfig();
+    if (next) {
+      liveStale = false;
+      if (next !== activeScene) {
+        activeScene = next;
+        markActiveScene();
+      }
+    } else {
+      liveStale = true;
+    }
+    renderLive();
+  } catch (error) {
+    liveStale = true;
+    renderLive();
+  } finally {
+    pollBusy = false;
+  }
+}, 500);
 
 async function refreshRemote() {
   const button = document.getElementById("remote-toggle");
@@ -740,5 +956,40 @@ document.getElementById("remote-toggle").addEventListener("click", async () => {
   }
 });
 
+function startLinkProbe() {
+  const box = document.getElementById("link");
+  const text = document.getElementById("link-text");
+  if (hasKsu) return;
+  box.hidden = false;
+  let probing = false;
+  const tick = async () => {
+    if (probing) return;
+    probing = true;
+    const started = performance.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    try {
+      const response = await fetch("/cgi-bin/api?op=ping&t=" + Date.now(), {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const body = await response.text();
+      if (!response.ok || body.trim() !== "ok") throw new Error("bad");
+      const ms = Math.max(0, Math.round(performance.now() - started));
+      box.className = "link ok";
+      text.textContent = "连接正常 " + ms + " ms";
+    } catch (error) {
+      box.className = "link bad";
+      text.textContent = "连接中断";
+    } finally {
+      clearTimeout(timer);
+      probing = false;
+    }
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+
 saveEl.addEventListener("click", save);
 refresh().then(refreshRemote);
+startLinkProbe();
