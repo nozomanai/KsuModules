@@ -1,2 +1,7 @@
 /*.zip
 /services-decompiled/
+*.apk
+*.so
+*.jar
+*.dex
+*.jks
