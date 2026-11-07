@@ -1,6 +1,6 @@
 id=miui-localization
 name=MIUI Localization
-version=1.7
-versionCode=8
+version=1.9
+versionCode=10
 author=local
-description=挂载 MIUI 桌面搜索、小爱同学、天气和日历。天气和日历始终覆盖系统同路径应用。桌面搜索和小爱同学仅在未安装时挂载。日志：/data/adb/miui-localization.log
+description=挂载 MIUI 桌面搜索、小爱同学、天气、日历、相册和时钟。天气、日历、相册和时钟始终覆盖系统同路径应用。桌面搜索和小爱同学仅在未安装时挂载。日志：/data/adb/miui-localization.log

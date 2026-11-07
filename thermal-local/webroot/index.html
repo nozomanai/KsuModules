@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本机温控</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>本机温控</h1>
+      <p id="status">正在读取策略</p>
+    </div>
+    <label>
+      作用范围
+      <select id="mode">
+        <option value="all">所有场景</option>
+        <option value="normal">仅普通场景</option>
+        <option value="off">关闭覆盖</option>
+      </select>
+    </label>
+  </header>
+  <div class="toolbar">
+    <button id="reload" type="button">重新读取</button>
+    <button id="defaults" type="button">载入初始值</button>
+    <button id="save" type="button" class="primary">保存并应用</button>
+  </div>
+  <main id="cards"></main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

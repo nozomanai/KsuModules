@@ -97,5 +97,7 @@ skip_if_installed com.miui.voiceassistoverlay \
 
 log_msg "keep package=com.miui.weather2 path=system/product/priv-app/Weather reason=always-overlay"
 log_msg "keep package=com.android.calendar path=system/product/priv-app/Calendar reason=always-overlay"
+log_msg "keep package=com.miui.gallery path=system/product/priv-app/MiuiGallery reason=always-overlay"
+log_msg "keep package=com.android.deskclock path=system/product/app/DeskClock reason=always-overlay"
 
 log_msg "install end"

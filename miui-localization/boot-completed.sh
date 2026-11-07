@@ -32,12 +32,41 @@ install_if_needed com.android.quicksearchbox
 install_if_needed com.miui.voiceassist
 install_if_needed com.miui.weather2
 install_if_needed com.android.calendar
+install_if_needed com.miui.gallery
+install_if_needed com.android.deskclock
 install_if_needed com.miui.voicetrigger
 install_if_needed com.xiaomi.mibrain.speech
 install_if_needed com.xiaomi.aiasst.service
 install_if_needed com.xiaomi.aireco
 install_if_needed com.miui.voiceassistProxy
 install_if_needed com.miui.voiceassistoverlay
+
+restore_clock_data() {
+  KEEP=/data/adb/miui-localization-clock-keep
+  DONE=/data/adb/miui-localization.clock-restored
+  if [ -f "$DONE" ] || [ ! -d "$KEEP/ce" ]; then
+    return 0
+  fi
+  DEST=/data/user/0/com.android.deskclock
+  if [ ! -d "$DEST" ]; then
+    log_msg "clock restore skip reason=data-dir-missing"
+    return 0
+  fi
+  OWN=$(stat -c '%u:%g' "$DEST" 2>/dev/null)
+  cp -a "$KEEP/ce/." "$DEST/"
+  if [ -d "$KEEP/de" ] && [ -d /data/user_de/0/com.android.deskclock ]; then
+    cp -a "$KEEP/de/." /data/user_de/0/com.android.deskclock/
+    chown -R "$OWN" /data/user_de/0/com.android.deskclock
+    restorecon -R /data/user_de/0/com.android.deskclock >/dev/null 2>&1
+  fi
+  chown -R "$OWN" "$DEST"
+  restorecon -R "$DEST" >/dev/null 2>&1
+  am force-stop com.android.deskclock >/dev/null 2>&1
+  touch "$DONE"
+  log_msg "clock restore done owner=$OWN"
+}
+
+restore_clock_data
 
 VA=$(pm path --user 0 com.miui.voiceassist 2>/dev/null)
 if [ -z "$VA" ]; then

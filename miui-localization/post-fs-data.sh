@@ -128,6 +128,8 @@ for REL in \
   priv-app/VoiceAssistAndroidT/VoiceAssistAndroidT.apk \
   priv-app/Weather/Weather.apk \
   priv-app/Calendar/Calendar.apk \
+  priv-app/MiuiGallery/MiuiGallery.apk \
+  app/DeskClock/DeskClock.apk \
   app/VoiceTrigger/VoiceTrigger.apk \
   app/MIUIAiasstService/MIUIAiasstService.apk \
   app/XiaoaiRecommendation/XiaoaiRecommendation.apk \
@@ -225,4 +227,185 @@ reset_localized_packages() {
   log_msg "package reset done weather=$WSIZE calendar=$CSIZE"
 }
 
+# Gallery and clock are signed by Xiaomi.eu on this phone. Drop only those two
+# records. Weather and calendar were already reset and must keep their data.
+reset_gallery_clock() {
+  MARK=/data/adb/miui-localization.reset-gallery-clock
+  if [ -f "$MARK" ]; then
+    log_msg "gallery clock reset skip reason=already-done"
+    return 0
+  fi
+  if [ ! -f "$MODDIR/reset-packages-more.awk" ]; then
+    log_msg "gallery clock reset skip reason=awk-missing"
+    return 0
+  fi
+  GAPK=/product/priv-app/MiuiGallery/MiuiGallery.apk
+  CAPK=/product/app/DeskClock/DeskClock.apk
+  if [ ! -f "$GAPK" ] || [ ! -f "$CAPK" ]; then
+    log_msg "gallery clock reset skip reason=apk-not-mounted"
+    return 0
+  fi
+  GSIZE=$(wc -c < "$GAPK" | tr -d ' ')
+  CSIZE=$(wc -c < "$CAPK" | tr -d ' ')
+  if [ "$GSIZE" != "147648906" ] || [ "$CSIZE" != "17266533" ]; then
+    log_msg "gallery clock reset skip reason=unexpected-size gallery=$GSIZE clock=$CSIZE"
+    return 0
+  fi
+  if [ ! -f /product/priv-app/MiuiGallery/lib/arm64/libapp_gallery.so ]; then
+    log_msg "gallery clock reset skip reason=gallery-lib-missing"
+    return 0
+  fi
+  if ! command -v abx2xml >/dev/null 2>&1 || ! command -v xml2abx >/dev/null 2>&1; then
+    log_msg "gallery clock reset skip reason=abx-tool-missing"
+    return 0
+  fi
+  PKGXML=/data/system/packages.xml
+  if [ ! -f "$PKGXML" ]; then
+    log_msg "gallery clock reset skip reason=packages-xml-missing"
+    return 0
+  fi
+  WORK=/data/local/tmp/miui-loc-reset-more
+  rm -rf "$WORK"
+  mkdir -p "$WORK"
+  if ! abx2xml "$PKGXML" "$WORK/packages.xml"; then
+    log_msg "gallery clock reset fail reason=abx2xml"
+    return 0
+  fi
+  awk -f "$MODDIR/reset-packages-more.awk" "$WORK/packages.xml" > "$WORK/packages-new.xml"
+  if ! grep -q "</packages>" "$WORK/packages-new.xml"; then
+    log_msg "gallery clock reset fail reason=missing-root-end"
+    return 0
+  fi
+  if grep -q 'package name="com.miui.gallery"' "$WORK/packages-new.xml" || grep -q 'packageName="com.miui.gallery"' "$WORK/packages-new.xml"; then
+    log_msg "gallery clock reset fail reason=gallery-remains"
+    return 0
+  fi
+  if grep -q 'package name="com.android.deskclock"' "$WORK/packages-new.xml" || grep -q 'packageName="com.android.deskclock"' "$WORK/packages-new.xml"; then
+    log_msg "gallery clock reset fail reason=clock-remains"
+    return 0
+  fi
+  if ! grep -q 'package name="com.miui.weather2"' "$WORK/packages-new.xml"; then
+    log_msg "gallery clock reset fail reason=weather-missing"
+    return 0
+  fi
+  if ! xml2abx "$WORK/packages-new.xml" "$WORK/packages.abx"; then
+    log_msg "gallery clock reset fail reason=xml2abx"
+    return 0
+  fi
+  if ! abx2xml "$WORK/packages.abx" "$WORK/packages-check.xml"; then
+    log_msg "gallery clock reset fail reason=recheck"
+    return 0
+  fi
+  if grep -q 'package name="com.miui.gallery"' "$WORK/packages-check.xml"; then
+    log_msg "gallery clock reset fail reason=gallery-remains-after-abx"
+    return 0
+  fi
+  cp -a "$PKGXML" /data/adb/miui-localization.packages-gallery-clock.xml.bak
+  cp -a "$WORK/packages.abx" "$PKGXML"
+  chown system:system "$PKGXML"
+  chmod 660 "$PKGXML"
+  chcon u:object_r:system_data_file:s0 "$PKGXML"
+  rm -rf /data/system/package_cache
+  rm -f /data/dalvik-cache/arm64/product@priv-app@MiuiGallery@MiuiGallery.apk@* \
+    /data/dalvik-cache/arm64/product@app@DeskClock@DeskClock.apk@*
+  rm -rf /data/user/0/com.miui.gallery /data/user_de/0/com.miui.gallery \
+    /data/user/0/com.android.deskclock /data/user_de/0/com.android.deskclock \
+    /data/misc/profiles/cur/0/com.miui.gallery /data/misc/profiles/ref/com.miui.gallery \
+    /data/misc/profiles/cur/0/com.android.deskclock /data/misc/profiles/ref/com.android.deskclock
+  touch "$MARK"
+  log_msg "gallery clock reset done gallery=$GSIZE clock=$CSIZE"
+}
+
+# The domestic repeat list, including legal workdays, is hidden while
+# miui.os.Build.IS_INTERNATIONAL_BUILD is true. The patched clock reports
+# itself as domestic. Its signature is no longer the image signature, so the
+# package record has to be dropped once. Alarm data is copied aside and put
+# back after the new package is created.
+reset_clock_repeat() {
+  MARK=/data/adb/miui-localization.reset-clock-repeat
+  if [ -f "$MARK" ]; then
+    log_msg "clock repeat skip reason=already-done"
+    return 0
+  fi
+  if [ ! -f "$MODDIR/reset-packages-clock.awk" ]; then
+    log_msg "clock repeat skip reason=awk-missing"
+    return 0
+  fi
+  CAPK=/product/app/DeskClock/DeskClock.apk
+  if [ ! -f "$CAPK" ]; then
+    log_msg "clock repeat skip reason=apk-not-mounted"
+    return 0
+  fi
+  CSIZE=$(wc -c < "$CAPK" | tr -d ' ')
+  if [ "$CSIZE" != "17366862" ]; then
+    log_msg "clock repeat skip reason=unexpected-size clock=$CSIZE"
+    return 0
+  fi
+  if ! command -v abx2xml >/dev/null 2>&1 || ! command -v xml2abx >/dev/null 2>&1; then
+    log_msg "clock repeat skip reason=abx-tool-missing"
+    return 0
+  fi
+  PKGXML=/data/system/packages.xml
+  if [ ! -f "$PKGXML" ]; then
+    log_msg "clock repeat skip reason=packages-xml-missing"
+    return 0
+  fi
+  KEEP=/data/adb/miui-localization-clock-keep
+  rm -rf "$KEEP"
+  mkdir -p "$KEEP/ce" "$KEEP/de"
+  if [ -d /data/user/0/com.android.deskclock ]; then
+    cp -a /data/user/0/com.android.deskclock/. "$KEEP/ce/"
+  fi
+  if [ -d /data/user_de/0/com.android.deskclock ]; then
+    cp -a /data/user_de/0/com.android.deskclock/. "$KEEP/de/"
+  fi
+  log_msg "clock repeat backup ce=$(find "$KEEP/ce" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  WORK=/data/local/tmp/miui-loc-reset-clock
+  rm -rf "$WORK"
+  mkdir -p "$WORK"
+  if ! abx2xml "$PKGXML" "$WORK/packages.xml"; then
+    log_msg "clock repeat fail reason=abx2xml"
+    return 0
+  fi
+  awk -f "$MODDIR/reset-packages-clock.awk" "$WORK/packages.xml" > "$WORK/packages-new.xml"
+  if ! grep -q "</packages>" "$WORK/packages-new.xml"; then
+    log_msg "clock repeat fail reason=missing-root-end"
+    return 0
+  fi
+  if grep -q 'package name="com.android.deskclock"' "$WORK/packages-new.xml" || grep -q 'packageName="com.android.deskclock"' "$WORK/packages-new.xml"; then
+    log_msg "clock repeat fail reason=clock-remains"
+    return 0
+  fi
+  if ! grep -q 'package name="com.miui.gallery"' "$WORK/packages-new.xml"; then
+    log_msg "clock repeat fail reason=gallery-missing"
+    return 0
+  fi
+  if ! xml2abx "$WORK/packages-new.xml" "$WORK/packages.abx"; then
+    log_msg "clock repeat fail reason=xml2abx"
+    return 0
+  fi
+  if ! abx2xml "$WORK/packages.abx" "$WORK/packages-check.xml"; then
+    log_msg "clock repeat fail reason=recheck"
+    return 0
+  fi
+  if grep -q 'package name="com.android.deskclock"' "$WORK/packages-check.xml"; then
+    log_msg "clock repeat fail reason=clock-remains-after-abx"
+    return 0
+  fi
+  cp -a "$PKGXML" /data/adb/miui-localization.packages-clock.xml.bak
+  cp -a "$WORK/packages.abx" "$PKGXML"
+  chown system:system "$PKGXML"
+  chmod 660 "$PKGXML"
+  chcon u:object_r:system_data_file:s0 "$PKGXML"
+  rm -rf /data/system/package_cache
+  rm -f /data/dalvik-cache/arm64/product@app@DeskClock@DeskClock.apk@*
+  rm -rf /data/user/0/com.android.deskclock /data/user_de/0/com.android.deskclock \
+    /data/misc/profiles/cur/0/com.android.deskclock /data/misc/profiles/ref/com.android.deskclock
+  rm -f /data/adb/miui-localization.clock-restored
+  touch "$MARK"
+  log_msg "clock repeat reset done clock=$CSIZE"
+}
+
 reset_localized_packages
+reset_gallery_clock
+reset_clock_repeat

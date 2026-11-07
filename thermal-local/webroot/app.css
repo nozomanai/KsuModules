@@ -1,0 +1,157 @@
+:root {
+  color-scheme: dark;
+  --bg: #101114;
+  --card: #1b1e24;
+  --line: #313640;
+  --text: #eceff4;
+  --muted: #a3acb8;
+  --accent: #8eb6ff;
+  --danger: #ffb4ab;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 system-ui, sans-serif;
+}
+
+header, .toolbar, main {
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 2;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+#status {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+select, input, button {
+  font: inherit;
+  color: var(--text);
+  background: #12151a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+select, button {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+button { flex: 1; }
+
+button.primary {
+  background: var(--accent);
+  color: #101114;
+  border-color: transparent;
+  font-weight: 650;
+}
+
+button:disabled { opacity: 0.55; }
+
+.card {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.device {
+  margin: 2px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.level {
+  display: grid;
+  grid-template-columns: 28px repeat(auto-fit, minmax(72px, 1fr));
+  gap: 6px;
+  align-items: end;
+}
+
+.index {
+  color: var(--muted);
+  font-size: 13px;
+  padding-bottom: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 8px;
+}
+
+details {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.weights {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
