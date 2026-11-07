@@ -24,3 +24,4 @@ for name in $names; do
     chattr +i "$DEST/$name" 2>/dev/null || true
   fi
 done
+sh "$MODDIR/conf.sh" restore >/dev/null 2>&1 || true

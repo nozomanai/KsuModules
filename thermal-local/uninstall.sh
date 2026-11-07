@@ -8,6 +8,7 @@ if [ ! -d "$DEST" ]; then
   exit 0
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') uninstall" >> "$LOG" 2>/dev/null || true
+sh "${0%/*}/conf.sh" purge >/dev/null 2>&1 || true
 for name in thermal-normal.conf thermal-gl-normal.conf thermal-ind-normal.conf thermal-map.conf thermal-map-gl.conf thermal-map-ind.conf; do
   if [ -f "$DEST/$name" ]; then
     chattr -i "$DEST/$name" 2>/dev/null || true

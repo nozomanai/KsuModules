@@ -5,6 +5,17 @@ LOG=/data/adb/thermal-local.log
 op=${QUERY_STRING#op=}
 op=${op%%&*}
 
+qs_arg() {
+  key=$1
+  case "&${QUERY_STRING}&" in
+    *"&${key}="*)
+      val=${QUERY_STRING#*${key}=}
+      val=${val%%&*}
+      printf '%s' "$val"
+      ;;
+  esac
+}
+
 header() {
   printf 'Status: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n' "$1"
 }
@@ -144,7 +155,32 @@ case "$op" in
     ;;
   files)
     ok
-    ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf 2>/dev/null
+    ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf /data/vendor/thermal/config/thermal-*.conf 2>/dev/null
+    ;;
+  edited)
+    ok
+    cat "$MOD/configs/installed.txt" 2>/dev/null || true
+    ;;
+  readconf)
+    name=$(qs_arg name)
+    err="$MOD/configs/.err"
+    mkdir -p "$MOD/configs"
+    if ! sh "$MOD/conf.sh" read "$name" > "$MOD/configs/.read" 2>"$err"; then
+      fail 500 "$(cat "$err" 2>/dev/null)"
+    fi
+    ok
+    cat "$MOD/configs/.read"
+    ;;
+  writeconf)
+    name=$(qs_arg name)
+    err="$MOD/configs/.err"
+    mkdir -p "$MOD/configs"
+    read_body > "$MOD/configs/.incoming"
+    if ! sh "$MOD/conf.sh" write "$name" < "$MOD/configs/.incoming" > "$MOD/configs/.write" 2>"$err"; then
+      fail 500 "$(cat "$err" 2>/dev/null)"
+    fi
+    ok
+    cat "$MOD/configs/.write"
     ;;
   ping)
     ok

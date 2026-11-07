@@ -12,16 +12,27 @@ function remoteOpForPath(path) {
   return "";
 }
 
-async function apiGet(op) {
-  const response = await fetch("/cgi-bin/api?op=" + encodeURIComponent(op));
+function apiUrl(op, params) {
+  let url = "/cgi-bin/api?op=" + encodeURIComponent(op);
+  if (params) {
+    for (const key of Object.keys(params)) {
+      url += "&" + encodeURIComponent(key) + "=" + encodeURIComponent(params[key]);
+    }
+  }
+  return url;
+}
+
+async function apiGet(op, params) {
+  const response = await fetch(apiUrl(op, params), { cache: "no-store" });
   const text = await response.text();
   if (!response.ok) throw new Error(text.trim() || "读取失败");
   return text;
 }
 
-async function apiPost(op, body) {
-  const response = await fetch("/cgi-bin/api?op=" + encodeURIComponent(op), {
+async function apiPost(op, body, params) {
+  const response = await fetch(apiUrl(op, params), {
     method: "POST",
+    cache: "no-store",
     body: body == null ? "" : body,
   });
   const text = await response.text();
@@ -181,8 +192,11 @@ function render() {
   note.className = "note";
   note.textContent = "温度按 °C 显示，保存时写回毫摄氏度。频率保持 Hz。";
   cardsEl.appendChild(note);
+  fillProfile(cardsEl, state);
+}
 
-  for (const section of state.sections) {
+function fillProfile(root, parsed) {
+  for (const section of parsed.sections) {
     const card = document.createElement("section");
     card.className = "card";
     const heading = document.createElement("h2");
@@ -306,14 +320,18 @@ function render() {
       card.appendChild(details);
     }
 
-    if (card.querySelector("input")) cardsEl.appendChild(card);
+    if (card.querySelector("input")) root.appendChild(card);
   }
 }
 
 function collect() {
-  const next = parseProfile(serialize(state));
+  return collectFrom(cardsEl, state);
+}
+
+function collectFrom(root, parsed) {
+  const next = parseProfile(serialize(parsed));
   const byName = new Map(next.sections.map((section) => [section.name, section]));
-  for (const input of cardsEl.querySelectorAll("input")) {
+  for (const input of root.querySelectorAll("input")) {
     const section = byName.get(input.dataset.sec);
     const values = section.fields[input.dataset.key];
     values[Number(input.dataset.index)] = storedValue(input.value, input.dataset.kind);
@@ -399,6 +417,8 @@ function showPanels() {
   const scene = modeEl.value === "scene";
   document.getElementById("scenes").hidden = !scene;
   document.getElementById("cards").hidden = scene;
+  document.getElementById("live").hidden = !scene;
+  document.getElementById("all-note").hidden = modeEl.value !== "all";
   document.getElementById("defaults").textContent = scene ? "恢复原厂对应" : "载入初始值";
 }
 
@@ -869,7 +889,8 @@ document.querySelector("#defaults").addEventListener("click", async () => {
 modeEl.addEventListener("change", async () => {
   showPanels();
   renderLive();
-  if (modeEl.value === "scene" && sceneRows.length === 0) {
+  if (modeEl.value === "scene") {
+    if (sceneRows.length > 0) return;
     setBusy(true);
     try {
       if (sceneIndex.size === 0 || stockAssign.size === 0) await loadCatalog();
@@ -881,6 +902,17 @@ modeEl.addEventListener("change", async () => {
       renderLive();
       setBusy(false);
     }
+    return;
+  }
+  if (state) return;
+  setBusy(true);
+  try {
+    await loadProfile(dir + "/profile.conf");
+    setStatus("已读取 " + state.sections.length + " 段");
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    setBusy(false);
   }
 });
 document.getElementById("scene-list").addEventListener("change", () => {
@@ -989,6 +1021,182 @@ function startLinkProbe() {
   tick();
   setInterval(tick, 1000);
 }
+
+let fileNames = [];
+let editedNames = new Set();
+let filesLoaded = false;
+let editorName = "";
+let editorParsed = null;
+let editorRaw = false;
+
+function confNameOk(name) {
+  return /^thermal-[A-Za-z0-9._-]+\.conf$/.test(name) && name.indexOf("..") < 0;
+}
+
+function showPage(page) {
+  const files = page === "files";
+  document.getElementById("page-control").hidden = files;
+  document.getElementById("control-head").hidden = files;
+  document.getElementById("page-files").hidden = !files;
+  document.getElementById("tab-control").classList.toggle("on", !files);
+  document.getElementById("tab-files").classList.toggle("on", files);
+  if (files && !filesLoaded) loadFileList();
+}
+
+async function listConfText() {
+  if (!hasKsu) return apiGet("files");
+  const result = await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf /data/vendor/thermal/config/thermal-*.conf 2>/dev/null");
+  return result.stdout || "";
+}
+
+async function editedConfText() {
+  if (!hasKsu) {
+    try {
+      return await apiGet("edited");
+    } catch (error) {
+      return "";
+    }
+  }
+  const result = await exec("cat '" + dir + "/configs/installed.txt'");
+  return result.errno === 0 ? result.stdout : "";
+}
+
+function renderFileList() {
+  const list = document.getElementById("file-list");
+  const query = document.getElementById("file-filter").value.trim().toLowerCase();
+  list.innerHTML = "";
+  const names = fileNames.filter((name) => !query || name.toLowerCase().indexOf(query) >= 0);
+  if (!names.length) {
+    const empty = document.createElement("p");
+    empty.className = "note";
+    empty.textContent = fileNames.length ? "没有匹配的温控文件" : "没有读到温控文件";
+    list.appendChild(empty);
+    return;
+  }
+  for (const name of names) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = editedNames.has(name) ? name + "  已覆盖" : name;
+    button.addEventListener("click", () => openEditor(name));
+    list.appendChild(button);
+  }
+}
+
+async function loadFileList() {
+  const list = document.getElementById("file-list");
+  list.textContent = "正在读取温控文件";
+  try {
+    const listed = await listConfText();
+    const edited = await editedConfText();
+    fileNames = Array.from(new Set(listed.split(/\r?\n/).map((line) => line.trim().split("/").pop()).filter(confNameOk))).sort();
+    editedNames = new Set(edited.split("\n").map((line) => line.trim()).filter(confNameOk));
+    filesLoaded = true;
+    renderFileList();
+  } catch (error) {
+    filesLoaded = false;
+    list.textContent = error.message;
+  }
+}
+
+async function readConf(name) {
+  if (!confNameOk(name)) throw new Error("文件名不对");
+  if (!hasKsu) return apiGet("readconf", { name: name });
+  const result = await exec("sh '" + dir + "/conf.sh' read '" + name + "'");
+  if (result.errno !== 0) throw new Error((result.stderr || result.stdout || "读取失败").trim());
+  return result.stdout;
+}
+
+async function writeConf(name, text) {
+  if (!confNameOk(name)) throw new Error("文件名不对");
+  if (!hasKsu) {
+    const log = await apiPost("writeconf", text, { name: name });
+    if (log.indexOf("saved") < 0) throw new Error(log.trim() || "保存失败");
+    return;
+  }
+  await writeFile("/data/local/tmp/thermal-conf-incoming", text);
+  const result = await exec("sh '" + dir + "/conf.sh' write '" + name + "' < /data/local/tmp/thermal-conf-incoming");
+  if (result.errno !== 0 || result.stdout.indexOf("saved") < 0) {
+    throw new Error((result.stderr || result.stdout || "保存失败").trim());
+  }
+}
+
+function closeEditor() {
+  document.getElementById("editor").hidden = true;
+  document.getElementById("editor-body").innerHTML = "";
+  editorName = "";
+  editorParsed = null;
+  editorRaw = false;
+}
+
+async function openEditor(name) {
+  const modal = document.getElementById("editor");
+  const body = document.getElementById("editor-body");
+  const status = document.getElementById("editor-status");
+  document.getElementById("editor-title").textContent = name;
+  document.getElementById("editor-save").disabled = true;
+  body.innerHTML = "";
+  status.textContent = "正在读取";
+  modal.hidden = false;
+  editorName = name;
+  try {
+    const text = await readConf(name);
+    if (editorName !== name) return;
+    editorParsed = parseProfile(text);
+    fillProfile(body, editorParsed);
+    editorRaw = !body.querySelector("input");
+    if (editorRaw) {
+      const area = document.createElement("textarea");
+      area.className = "raw-editor";
+      area.value = text;
+      body.appendChild(area);
+    }
+    status.textContent = "温度按 °C 显示。保存会加密写入温控目录，并重启温控进程。";
+    document.getElementById("editor-save").disabled = false;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function saveEditor() {
+  const button = document.getElementById("editor-save");
+  const status = document.getElementById("editor-status");
+  const name = editorName;
+  if (!name) return;
+  button.disabled = true;
+  status.textContent = "正在保存并重启温控";
+  try {
+    let text = "";
+    if (editorRaw) {
+      const area = document.getElementById("editor-body").querySelector("textarea");
+      text = area ? area.value : "";
+    } else {
+      editorParsed = collectFrom(document.getElementById("editor-body"), editorParsed);
+      text = serialize(editorParsed);
+    }
+    await writeConf(name, text);
+    editedNames.add(name);
+    renderFileList();
+    status.textContent = "已保存，温控进程已重启";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.getElementById("tab-control").addEventListener("click", () => showPage("control"));
+document.getElementById("tab-files").addEventListener("click", () => showPage("files"));
+document.getElementById("file-filter").addEventListener("input", () => {
+  if (filesLoaded) renderFileList();
+});
+document.getElementById("editor-close").addEventListener("click", closeEditor);
+document.getElementById("editor").addEventListener("click", (event) => {
+  if (event.target.id === "editor") closeEditor();
+});
+document.getElementById("editor-save").addEventListener("click", saveEditor);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.getElementById("editor").hidden) closeEditor();
+});
 
 saveEl.addEventListener("click", save);
 refresh().then(refreshRemote);

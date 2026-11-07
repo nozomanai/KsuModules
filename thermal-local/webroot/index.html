@@ -8,14 +8,21 @@
 </head>
 <body>
   <header>
+  <nav class="menubar">
+    <div id="link" class="link" hidden>
+      <span class="dot"></span>
+      <span id="link-text">正在连接</span>
+    </div>
+    <div class="menu-tabs">
+      <button id="tab-control" class="tab on" type="button">控制</button>
+      <button id="tab-files" class="tab" type="button">配置</button>
+    </div>
+  </nav>
+  <div id="control-head">
     <div class="head-top">
       <div>
         <h1>本机温控</h1>
         <p id="status">正在读取策略</p>
-      </div>
-      <div id="link" class="link" hidden>
-        <span class="dot"></span>
-        <span id="link-text">正在连接</span>
       </div>
       <label>
         作用范围
@@ -27,7 +34,11 @@
         </select>
       </label>
     </div>
-    <div id="live" class="livebar wait" aria-live="polite">
+    <div id="all-note" class="mode-note">
+      <strong>所有场景</strong>
+      <p>下面编辑的温度曲线会应用到每一个场景。系统仍会按前台切换场景号，但每个场景读到的都是这份曲线，不再使用各自的原厂温控文件。</p>
+    </div>
+    <div id="live" class="livebar wait" hidden aria-live="polite">
       <div class="live-row">
         <span class="live-k"><span class="dot"></span>当前场景</span>
         <div>
@@ -43,7 +54,9 @@
         </div>
       </div>
     </div>
+  </div>
   </header>
+  <div id="page-control">
   <div class="toolbar">
     <button id="reload" type="button">重新读取</button>
     <button id="defaults" type="button">载入初始值</button>
@@ -60,6 +73,25 @@
     <div id="scene-list"></div>
   </section>
   <main id="cards"></main>
-  <script type="module" src="app.js?v=demo"></script>
+  </div>
+  <section id="page-files" hidden>
+    <p class="note">点一个温控文件可以查看和修改。保存后加密写入温控目录，并重启温控进程。</p>
+    <input id="file-filter" type="search" placeholder="筛选温控文件">
+    <div id="file-list"></div>
+  </section>
+  <div id="editor" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+      <div class="modal-head">
+        <h2 id="editor-title">温控文件</h2>
+        <button id="editor-close" type="button">关闭</button>
+      </div>
+      <p id="editor-status" class="hint"></p>
+      <div id="editor-body"></div>
+      <div class="modal-actions">
+        <button id="editor-save" type="button" class="primary">保存这个文件</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="app.js?v=readconf"></script>
 </body>
 </html>

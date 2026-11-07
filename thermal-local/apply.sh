@@ -163,6 +163,7 @@ if [ "$MODE" = "off" ]; then
   for name in $OWNED; do
     remove_owned "$name"
   done
+  sh "$MODDIR/conf.sh" purge >> "$LOG" 2>&1 || true
   restart_daemon
   log "overlays removed"
   exit 0
@@ -172,6 +173,7 @@ if [ "$MODE" = "scene" ]; then
   if ! apply_scene_maps; then
     exit 1
   fi
+  sh "$MODDIR/conf.sh" restore >> "$LOG" 2>&1 || true
   restart_daemon
   log "apply done"
   exit 0
@@ -227,6 +229,7 @@ else
   done
 fi
 
+sh "$MODDIR/conf.sh" restore >> "$LOG" 2>&1 || true
 restart_daemon
 log "apply done"
 exit 0
