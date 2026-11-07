@@ -406,6 +406,83 @@ reset_clock_repeat() {
   log_msg "clock repeat reset done clock=$CSIZE"
 }
 
+# The localized SMS, dialer, and yellow page are gone. Drop their package
+# records once so the stock copies are installed again. Message text stays
+# in the telephony provider. Contact rows stay in the contacts provider.
+drop_phone_localization() {
+  MARK=/data/adb/miui-localization.drop-phone
+  if [ -f "$MARK" ]; then
+    log_msg "phone drop skip reason=already-done"
+    return 0
+  fi
+  if [ ! -f "$MODDIR/reset-packages-phone.awk" ]; then
+    log_msg "phone drop skip reason=awk-missing"
+    return 0
+  fi
+  if ! command -v abx2xml >/dev/null 2>&1 || ! command -v xml2abx >/dev/null 2>&1; then
+    log_msg "phone drop skip reason=abx-tool-missing"
+    return 0
+  fi
+  PKGXML=/data/system/packages.xml
+  if [ ! -f "$PKGXML" ]; then
+    log_msg "phone drop skip reason=packages-xml-missing"
+    return 0
+  fi
+  WORK=/data/local/tmp/miui-loc-drop-phone
+  rm -rf "$WORK"
+  mkdir -p "$WORK"
+  if ! abx2xml "$PKGXML" "$WORK/packages.xml"; then
+    log_msg "phone drop fail reason=abx2xml"
+    return 0
+  fi
+  awk -f "$MODDIR/reset-packages-phone.awk" "$WORK/packages.xml" > "$WORK/packages-new.xml"
+  if ! grep -q "</packages>" "$WORK/packages-new.xml"; then
+    log_msg "phone drop fail reason=missing-root-end"
+    return 0
+  fi
+  if grep -q 'package name="com.android.mms"' "$WORK/packages-new.xml" || grep -q 'package name="com.android.contacts"' "$WORK/packages-new.xml" || grep -q 'package name="com.android.incallui"' "$WORK/packages-new.xml" || grep -q 'package name="com.miui.yellowpage"' "$WORK/packages-new.xml"; then
+    log_msg "phone drop fail reason=package-remains"
+    return 0
+  fi
+  if ! grep -q 'package name="com.android.deskclock"' "$WORK/packages-new.xml"; then
+    log_msg "phone drop fail reason=clock-missing"
+    return 0
+  fi
+  if ! xml2abx "$WORK/packages-new.xml" "$WORK/packages.abx"; then
+    log_msg "phone drop fail reason=xml2abx"
+    return 0
+  fi
+  if ! abx2xml "$WORK/packages.abx" "$WORK/packages-check.xml"; then
+    log_msg "phone drop fail reason=recheck"
+    return 0
+  fi
+  if grep -q 'package name="com.android.mms"' "$WORK/packages-check.xml"; then
+    log_msg "phone drop fail reason=mms-remains-after-abx"
+    return 0
+  fi
+  cp -a "$PKGXML" /data/adb/miui-localization.packages-phone-drop.xml.bak
+  cp -a "$WORK/packages.abx" "$PKGXML"
+  chown system:system "$PKGXML"
+  chmod 660 "$PKGXML"
+  chcon u:object_r:system_data_file:s0 "$PKGXML"
+  rm -rf /data/system/package_cache
+  rm -f /data/dalvik-cache/arm64/product@priv-app@Mms@Mms.apk@* \
+    /data/dalvik-cache/arm64/product@priv-app@Contacts@Contacts.apk@* \
+    /data/dalvik-cache/arm64/product@priv-app@InCallUI@InCallUI.apk@* \
+    /data/dalvik-cache/arm64/product@priv-app@MIUIYellowPage@MIUIYellowPage.apk@*
+  rm -rf /data/user/0/com.android.mms /data/user_de/0/com.android.mms \
+    /data/user/0/com.android.contacts /data/user_de/0/com.android.contacts \
+    /data/user/0/com.android.incallui /data/user_de/0/com.android.incallui \
+    /data/user/0/com.miui.yellowpage /data/user_de/0/com.miui.yellowpage \
+    /data/misc/profiles/cur/0/com.android.mms /data/misc/profiles/ref/com.android.mms \
+    /data/misc/profiles/cur/0/com.android.contacts /data/misc/profiles/ref/com.android.contacts \
+    /data/misc/profiles/cur/0/com.android.incallui /data/misc/profiles/ref/com.android.incallui \
+    /data/misc/profiles/cur/0/com.miui.yellowpage /data/misc/profiles/ref/com.miui.yellowpage
+  touch "$MARK"
+  log_msg "phone drop done"
+}
+
 reset_localized_packages
 reset_gallery_clock
 reset_clock_repeat
+drop_phone_localization
