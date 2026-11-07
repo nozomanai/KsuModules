@@ -29,7 +29,7 @@ fi
 
 MODE=$(cat "$MODEFILE" 2>/dev/null)
 case "$MODE" in
-  all|normal|off) ;;
+  all|normal|off|scene) ;;
   *) MODE=all ;;
 esac
 
@@ -99,12 +99,81 @@ fi
 mkdir -p "$GEN"
 log "apply mode=$MODE"
 
+apply_scene_maps() {
+  assign="$MODDIR/scene-map.txt"
+  if [ ! -s "$assign" ]; then
+    log "scene-map.txt missing"
+    return 1
+  fi
+  for name in thermal-normal.conf thermal-gl-normal.conf thermal-ind-normal.conf; do
+    remove_owned "$name"
+  done
+  for src in $MAPS; do
+    if [ ! -f "$src" ]; then
+      log "map missing $src"
+      continue
+    fi
+    base=${src##*/}
+    if ! crypt d "$src" "$GEN/$base.dec"; then
+      return 1
+    fi
+    awk -v ASSIGN="$assign" '
+      BEGIN {
+        while ((getline line < ASSIGN) > 0) {
+          split(line, a, " ")
+          if (a[1] != "" && a[2] != "") choice[a[1]] = a[2]
+        }
+      }
+      /^\[[0-9]+:/ {
+        id = $0
+        sub(/^\[/, "", id)
+        sub(/:.*/, "", id)
+        if (id in choice) {
+          print "[" id ":" choice[id] "]"
+          written[id] = 1
+          next
+        }
+        print
+        next
+      }
+      { print }
+      END {
+        for (id in choice) if (!(id in written)) print "[" id ":" choice[id] "]"
+      }
+    ' "$GEN/$base.dec" > "$GEN/$base.txt" || return 1
+    if ! crypt e "$GEN/$base.txt" "$GEN/$base"; then
+      return 1
+    fi
+    if ! crypt d "$GEN/$base" "$GEN/$base.check"; then
+      return 1
+    fi
+    if ! cmp -s "$GEN/$base.txt" "$GEN/$base.check"; then
+      log "map roundtrip mismatch $base"
+      return 1
+    fi
+    if ! install_file "$GEN/$base" "$base"; then
+      log "failed to write $base"
+      return 1
+    fi
+  done
+  return 0
+}
+
 if [ "$MODE" = "off" ]; then
   for name in $OWNED; do
     remove_owned "$name"
   done
   restart_daemon
   log "overlays removed"
+  exit 0
+fi
+
+if [ "$MODE" = "scene" ]; then
+  if ! apply_scene_maps; then
+    exit 1
+  fi
+  restart_daemon
+  log "apply done"
   exit 0
 fi
 

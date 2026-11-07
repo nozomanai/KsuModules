@@ -321,7 +321,209 @@ async function loadProfile(path) {
 
 async function loadMode() {
   const text = (await readFile(dir + "/mode")).trim();
-  modeEl.value = ["all", "normal", "off"].includes(text) ? text : "all";
+  modeEl.value = ["all", "normal", "scene", "off"].includes(text) ? text : "all";
+  showPanels();
+}
+
+let stockAssign = new Map();
+let sceneFiles = [];
+let sceneRows = [];
+let activeScene = "";
+
+function showPanels() {
+  const scene = modeEl.value === "scene";
+  document.getElementById("scenes").hidden = !scene;
+  document.getElementById("cards").hidden = scene;
+  document.getElementById("defaults").textContent = scene ? "恢复原厂对应" : "载入初始值";
+}
+
+function parseMap(text) {
+  const map = new Map();
+  for (const line of text.split("\n")) {
+    const match = line.match(/^\[(\d+):([^\]\s]+)\]/);
+    if (match) map.set(match[1], match[2]);
+    const plain = line.match(/^(\d+)\s+(\S+)/);
+    if (plain) map.set(plain[1], plain[2]);
+  }
+  return map;
+}
+
+const SCENE_USE = {
+  normal: "日常使用，没有游戏、相机、通话这些特殊前台",
+  huanji: "换机或数据迁移",
+  phone: "通话",
+  nolimits: "无限制性能前台",
+  noimits: "无限制性能前台",
+  class0: "被系统划入 class0 的前台应用",
+  arvr: "AR 或 VR",
+  navigation: "导航",
+  video: "视频播放",
+  demo: "店内演示",
+  videochatOrCamera: "视频通话",
+  camera: "打开相机",
+  "4K": "相机 4K 录像",
+  "8K": "相机 8K 录像",
+  game: "普通游戏",
+  pubg: "和平精英一类游戏",
+  game2: "第二类游戏",
+  optiGame: "优化名单里的游戏",
+  yuanshen: "原神一类游戏",
+  LowTempCharge: "低温环境下充电",
+  abnormal: "异常发热前台",
+  youtube: "YouTube 播放",
+  cgame: "悬浮窗里的游戏",
+  cclassvideo: "悬浮窗里的视频",
+  mgame: "游戏过程中通话",
+};
+
+function explainName(raw) {
+  let name = raw.trim().replace(/\s+/g, "");
+  const tags = [];
+  if (/-demo$/.test(name)) {
+    tags.push("演示机");
+    name = name.replace(/-demo$/, "");
+  }
+  if (name.startsWith("iec-")) {
+    tags.push("能效模式");
+    name = name.slice(4);
+  }
+  if (name.startsWith("hp-")) {
+    tags.push("高性能");
+    name = name.slice(3);
+  }
+  if (name.startsWith("per-")) {
+    tags.push("性能模式");
+    name = name.slice(4);
+  }
+  if (name.startsWith("tgame")) {
+    tags.push("性能模式");
+    name = name.replace(/^tgame~?/, "");
+    if (name.startsWith("per-")) name = name.slice(4);
+    if (!name) name = "game";
+  }
+  let night = false;
+  if (/nightVideo/i.test(name)) {
+    night = true;
+    name = name.replace(/~?nightVideo/ig, "").replace(/~$/, "");
+  }
+  const head = name.split("~")[0].split("+")[0];
+  let use = SCENE_USE[head] || head;
+  if (head === "camera" && night) use = "相机夜景录像";
+  if (head === "class0" && /videochat/i.test(raw)) use = "class0 前台叠加视频通话";
+  if (/phone\+tmgp/i.test(name) || head === "mgame") use = "游戏过程中通话";
+  return (tags.length ? tags.join("、") + "下，" : "") + use;
+}
+
+function parseScenes(xml) {
+  const grouped = new Map();
+  const pattern = /<scenario id="(\d+)" defined="[^"]*" name="([^"]+)"/g;
+  let match = pattern.exec(xml);
+  while (match) {
+    const id = match[1];
+    const raw = match[2];
+    if (!grouped.has(id)) grouped.set(id, { names: new Set(), hints: new Set() });
+    grouped.get(id).names.add(raw.split("~")[0]);
+    grouped.get(id).hints.add(explainName(raw));
+    match = pattern.exec(xml);
+  }
+  return Array.from(grouped.entries())
+    .map(([id, item]) => ({
+      id,
+      names: Array.from(item.names).sort(),
+      hint: Array.from(item.hints).join("；"),
+    }))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+function renderScenes() {
+  const list = document.getElementById("scene-list");
+  const query = document.getElementById("scene-filter").value.trim().toLowerCase();
+  list.innerHTML = "";
+  for (const row of sceneRows) {
+    const chosen = row.chosen || stockAssign.get(row.id) || sceneFiles[0] || "";
+    const blob = (row.id + " " + row.names.join(" ") + " " + (row.hint || "") + " " + chosen).toLowerCase();
+    const card = document.createElement("article");
+    card.className = "card scene-card";
+    card.dataset.id = row.id;
+    if (query && !blob.includes(query)) card.hidden = true;
+    const heading = document.createElement("h2");
+    heading.textContent = row.id + " " + (row.names[0] || "");
+    card.appendChild(heading);
+    if (row.names.length > 1) {
+      const meta = document.createElement("div");
+      meta.className = "device";
+      meta.textContent = row.names.join("、");
+      card.appendChild(meta);
+    }
+    if (row.hint) {
+      const hint = document.createElement("p");
+      hint.className = "hint";
+      hint.textContent = row.hint;
+      card.appendChild(hint);
+    }
+    const flag = document.createElement("div");
+    flag.className = "live-flag";
+    flag.textContent = "当前场景";
+    flag.hidden = true;
+    card.appendChild(flag);
+    const select = document.createElement("select");
+    select.dataset.id = row.id;
+    for (const file of sceneFiles) {
+      const option = document.createElement("option");
+      option.value = file;
+      option.textContent = file;
+      if (file === chosen) option.selected = true;
+      select.appendChild(option);
+    }
+    if (chosen && !sceneFiles.includes(chosen)) {
+      const option = document.createElement("option");
+      option.value = chosen;
+      option.textContent = chosen;
+      option.selected = true;
+      select.appendChild(option);
+    }
+    card.appendChild(select);
+    list.appendChild(card);
+  }
+  markActiveScene();
+}
+
+function markActiveScene() {
+  for (const card of document.querySelectorAll(".scene-card")) {
+    const live = card.dataset.id === activeScene;
+    card.classList.toggle("live", live);
+    const flag = card.querySelector(".live-flag");
+    const select = card.querySelector("select");
+    if (flag) flag.hidden = !live;
+    if (select) select.classList.toggle("live-file", live);
+  }
+}
+
+async function decryptStockMap() {
+  const out = dir + "/generated/stock-map.txt";
+  const result = await exec("mkdir -p '" + dir + "/generated'; CLASSPATH='" + dir + "/thermal-crypt.dex' /system/bin/app_process /system/bin ThermalCrypt d /vendor/etc/thermal-map.conf '" + out + "'");
+  if (result.errno !== 0) throw new Error(result.stderr || "场景表解密失败");
+  return readFile(out);
+}
+
+async function loadScenes() {
+  const xml = await readFile("/odm/etc/setting.xml");
+  const listed = await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf");
+  if (listed.errno !== 0) throw new Error(listed.stderr || "读取温控文件失败");
+  sceneFiles = Array.from(new Set(listed.stdout.split("\n").map((line) => line.trim().split("/").pop()).filter((name) => name && !name.includes("map")))).sort();
+  stockAssign = parseMap(await decryptStockMap());
+  let chosen = new Map();
+  const saved = await exec("cat '" + dir + "/scene-map.txt'");
+  if (saved.errno === 0) chosen = parseMap(saved.stdout);
+  sceneRows = parseScenes(xml).map((row) => ({
+    id: row.id,
+    names: row.names,
+    hint: row.hint,
+    chosen: chosen.get(row.id) || stockAssign.get(row.id) || "",
+  }));
+  const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
+  activeScene = now.errno === 0 ? now.stdout.trim() : "";
+  renderScenes();
 }
 
 async function refresh() {
@@ -330,8 +532,13 @@ async function refresh() {
   try {
     dir = moduleDir();
     await loadMode();
-    await loadProfile(dir + "/profile.conf");
-    setStatus("已读取 " + state.sections.length + " 段");
+    if (modeEl.value === "scene") {
+      await loadScenes();
+      setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + (activeScene || "未知"));
+    } else {
+      await loadProfile(dir + "/profile.conf");
+      setStatus("已读取 " + state.sections.length + " 段");
+    }
   } catch (error) {
     setStatus(error.message, true);
   } finally {
@@ -339,19 +546,38 @@ async function refresh() {
   }
 }
 
+async function saveCurves() {
+  const parsed = collect();
+  await writeFile(dir + "/profile.conf", serialize(parsed));
+  state = parsed;
+}
+
+async function saveScenes() {
+  const lines = [];
+  for (const select of document.querySelectorAll("#scene-list select")) {
+    if (select.value) lines.push(select.dataset.id + " " + select.value);
+  }
+  if (!lines.length) throw new Error("没有可写入的场景");
+  await writeFile(dir + "/scene-map.txt", lines.join("\n") + "\n");
+}
+
 async function save() {
   setBusy(true);
   setStatus("正在保存并重启温控");
   try {
-    const parsed = collect();
-    await writeFile(dir + "/profile.conf", serialize(parsed));
+    if (modeEl.value === "scene") await saveScenes();
+    else await saveCurves();
     await writeFile(dir + "/mode", modeEl.value + "\n");
     const result = await exec("sh '" + dir + "/apply.sh'");
     if (result.errno !== 0) {
       const log = await exec("tail -n 8 /data/adb/thermal-local.log");
       throw new Error((log.stdout || result.stderr || "应用失败").trim());
     }
-    state = parsed;
+    if (modeEl.value === "scene") {
+      const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
+      activeScene = now.errno === 0 ? now.stdout.trim() : activeScene;
+      markActiveScene();
+    }
     setStatus("已应用，温控进程已重启");
     toast("温控策略已应用");
   } catch (error) {
@@ -366,13 +592,51 @@ document.querySelector("#reload").addEventListener("click", refresh);
 document.querySelector("#defaults").addEventListener("click", async () => {
   setBusy(true);
   try {
-    await loadProfile(dir + "/profile.default");
-    setStatus("已载入初始值，还没有写入手机");
+    if (modeEl.value === "scene") {
+      sceneRows = sceneRows.map((row) => ({ ...row, chosen: stockAssign.get(row.id) || "" }));
+      renderScenes();
+      setStatus("已恢复原厂文件对应，还没有写入手机");
+    } else {
+      await loadProfile(dir + "/profile.default");
+      setStatus("已载入初始值，还没有写入手机");
+    }
   } catch (error) {
     setStatus(error.message, true);
   } finally {
     setBusy(false);
   }
 });
+modeEl.addEventListener("change", async () => {
+  showPanels();
+  if (modeEl.value === "scene" && sceneRows.length === 0) {
+    setBusy(true);
+    try {
+      await loadScenes();
+      setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + (activeScene || "未知"));
+    } catch (error) {
+      setStatus(error.message, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+});
+document.getElementById("scene-filter").addEventListener("input", () => {
+  const query = document.getElementById("scene-filter").value.trim().toLowerCase();
+  for (const card of document.querySelectorAll(".scene-card")) {
+    const select = card.querySelector("select");
+    const text = (card.dataset.id + " " + card.innerText + " " + (select ? select.value : "")).toLowerCase();
+    card.hidden = query !== "" && !text.includes(query);
+  }
+});
+setInterval(async () => {
+  if (modeEl.value !== "scene" || document.getElementById("scenes").hidden) return;
+  const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
+  if (now.errno !== 0) return;
+  const next = now.stdout.trim();
+  if (next === activeScene) return;
+  activeScene = next;
+  markActiveScene();
+  setStatus("已读取 " + sceneRows.length + " 个场景，当前场景号 " + activeScene);
+}, 2000);
 saveEl.addEventListener("click", save);
 refresh();

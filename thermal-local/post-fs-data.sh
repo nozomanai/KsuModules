@@ -8,6 +8,8 @@ if [ ! -d "$DEST" ] || [ "$MODE" = "off" ]; then
 fi
 if [ "$MODE" = "normal" ]; then
   names="thermal-normal.conf thermal-gl-normal.conf thermal-ind-normal.conf"
+elif [ "$MODE" = "scene" ]; then
+  names="thermal-map.conf thermal-map-gl.conf thermal-map-ind.conf"
 else
   names="thermal-normal.conf thermal-map.conf thermal-map-gl.conf thermal-map-ind.conf"
 fi

@@ -96,9 +96,15 @@ button:disabled { opacity: 0.55; }
 }
 
 .device {
-  margin: 2px 0 10px;
+  margin: 2px 0 4px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .levels {
@@ -154,4 +160,30 @@ details {
   margin: 0 0 12px;
   color: var(--muted);
   font-size: 13px;
+}
+
+#scenes { padding: 0 16px 16px; }
+
+#scene-filter {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.scene-card.live {
+  outline: 2px solid var(--accent);
+}
+
+.live-flag {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #101114;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.scene-card select.live-file {
+  border-color: var(--accent);
 }

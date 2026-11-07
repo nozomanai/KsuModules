@@ -17,6 +17,7 @@
       <select id="mode">
         <option value="all">所有场景</option>
         <option value="normal">仅普通场景</option>
+        <option value="scene">动态场景</option>
         <option value="off">关闭覆盖</option>
       </select>
     </label>
@@ -26,6 +27,11 @@
     <button id="defaults" type="button">载入初始值</button>
     <button id="save" type="button" class="primary">保存并应用</button>
   </div>
+  <section id="scenes" hidden>
+    <p class="note">每个场景号指定一份原厂温控文件。系统仍按前台状态切换场景号，当前场景和它正在使用的文件会高亮。</p>
+    <input id="scene-filter" type="search" placeholder="筛选场景或文件">
+    <div id="scene-list"></div>
+  </section>
   <main id="cards"></main>
   <script type="module" src="app.js"></script>
 </body>
