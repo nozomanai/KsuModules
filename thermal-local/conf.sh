@@ -1,8 +1,36 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
+NAME=${MODDIR##*/}
 GEN="$MODDIR/generated"
-CFG="$MODDIR/configs"
-LIST="$CFG/installed.txt"
+pick_data() {
+  storage="/storage/emulated/0/$NAME"
+  media="/data/media/0/$NAME"
+  card="/sdcard/$NAME"
+  if [ -d "$storage" ]; then
+    printf '%s\n' "$storage"
+    return
+  fi
+  if [ -d "$media" ]; then
+    printf '%s\n' "$media"
+    return
+  fi
+  if [ -d "$card" ]; then
+    printf '%s\n' "$card"
+    return
+  fi
+  if [ -d /storage/emulated/0 ]; then
+    printf '%s\n' "$storage"
+    return
+  fi
+  if [ -d /sdcard ]; then
+    printf '%s\n' "$card"
+    return
+  fi
+  printf '%s\n' "$media"
+}
+DATA=$(pick_data)
+CFG="$DATA/configs"
+LIST="$DATA/installed.txt"
 DEST=/data/vendor/thermal/config
 DEX="$MODDIR/thermal-crypt.dex"
 LOG=/data/adb/thermal-local.log
@@ -62,11 +90,47 @@ install_conf() {
   return 0
 }
 
-remember() {
+publish() {
   mkdir -p "$CFG"
+  chmod 755 "$DATA" "$CFG" 2>/dev/null || true
+  if [ -n "$1" ] && [ -f "$CFG/$1" ]; then
+    chmod 644 "$CFG/$1" 2>/dev/null || true
+    chcon u:object_r:media_rw_data_file:s0 "$CFG/$1" 2>/dev/null || true
+  fi
+  if [ -f "$LIST" ]; then
+    chmod 644 "$LIST" 2>/dev/null || true
+    chcon u:object_r:media_rw_data_file:s0 "$LIST" 2>/dev/null || true
+  fi
+  chcon u:object_r:media_rw_data_file:s0 "$DATA" "$CFG" 2>/dev/null || true
+}
+
+migrate_old() {
+  old="$MODDIR/configs"
+  if [ ! -d "$old" ]; then
+    return 0
+  fi
+  publish
+  if [ -f "$old/installed.txt" ] && [ ! -s "$LIST" ]; then
+    cp -f "$old/installed.txt" "$LIST"
+  fi
+  for f in "$old"/thermal-*.conf; do
+    if [ ! -f "$f" ]; then
+      continue
+    fi
+    base=${f##*/}
+    if [ ! -f "$CFG/$base" ]; then
+      cp -f "$f" "$CFG/$base"
+    fi
+  done
+  publish
+}
+
+remember() {
+  publish
   if [ ! -f "$LIST" ] || ! grep -qx "$1" "$LIST" 2>/dev/null; then
     printf '%s\n' "$1" >> "$LIST"
   fi
+  publish "$1"
 }
 
 restore_one() {
@@ -77,11 +141,19 @@ restore_one() {
   fi
 }
 
-if [ "$ns" != 1 ] && [ "$cmd" != "read" ] && [ ! -d "$DEST" ]; then
+migrate_old
+publish
+
+if [ "$ns" != 1 ] && [ "$cmd" != "read" ] && [ "$cmd" != "list" ] && [ ! -d "$DEST" ]; then
   exec nsenter -t 1 -m -- sh "$0" "$@" --ns
 fi
 
 case "$cmd" in
+  list)
+    if [ -f "$LIST" ]; then
+      cat "$LIST"
+    fi
+    ;;
   read)
     valid_name "$name" || exit 1
     if ! src=$(find_src "$name"); then
@@ -153,6 +225,44 @@ case "$cmd" in
       restore_one "$item"
     done < "$LIST"
     ;;
+  delete)
+    valid_name "$name" || exit 1
+    if [ ! -d "$DEST" ]; then
+      echo "找不到温控目录" >&2
+      exit 1
+    fi
+    owned=0
+    if [ -s "$CFG/$name" ] || { [ -f "$LIST" ] && grep -qx "$name" "$LIST" 2>/dev/null; }; then
+      owned=1
+    fi
+    if [ "$owned" != 1 ]; then
+      echo "原厂文件不能删除" >&2
+      exit 1
+    fi
+    stock=0
+    if [ -f "/odm/etc/$name" ] || [ -f "/vendor/etc/$name" ]; then
+      stock=1
+    fi
+    if [ -f "$DEST/$name" ]; then
+      chattr -i "$DEST/$name" 2>/dev/null || true
+      rm -f "$DEST/$name"
+    fi
+    rm -f "$CFG/$name" "$GEN/$name"
+    if [ -f "$LIST" ]; then
+      grep -vx "$name" "$LIST" > "$LIST.tmp" 2>/dev/null || true
+      mv -f "$LIST.tmp" "$LIST"
+    fi
+    stop mi_thermald 2>/dev/null || true
+    sleep 1
+    start mi_thermald 2>/dev/null || true
+    if [ "$stock" = 1 ]; then
+      log "restored stock $name"
+      printf '%s\n' restored
+    else
+      log "deleted $name"
+      printf '%s\n' deleted
+    fi
+    ;;
   purge)
     if [ ! -s "$LIST" ] || [ ! -d "$DEST" ]; then
       exit 0
@@ -167,7 +277,7 @@ case "$cmd" in
     done < "$LIST"
     ;;
   *)
-    echo "usage: conf.sh read|write|restore|purge" >&2
+    echo "usage: conf.sh read|write|delete|list|restore|purge" >&2
     exit 1
     ;;
 esac

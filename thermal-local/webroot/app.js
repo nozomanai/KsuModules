@@ -195,6 +195,489 @@ function render() {
   fillProfile(cardsEl, state);
 }
 
+const freqTables = {
+  cpu0: [384000, 556800, 748800, 960000, 1152000, 1363200, 1555200, 1785600, 1996800, 2227200, 2400000, 2745600, 2918400, 3072000, 3321600, 3532800],
+  cpu6: [1017600, 1209600, 1401600, 1689600, 1958400, 2246400, 2438400, 2649600, 2841600, 3072000, 3283200, 3513600, 3801600, 4089600, 4204800, 4320000],
+};
+
+async function loadFreqs() {
+  try {
+    let text = "";
+    if (!hasKsu) text = await apiGet("freqs");
+    else {
+      const result = await exec("echo cpu0 $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies); echo cpu6 $(cat /sys/devices/system/cpu/cpu6/cpufreq/scaling_available_frequencies)");
+      if (result.errno !== 0) return;
+      text = result.stdout || "";
+    }
+    const next = {};
+    for (const line of text.split(/\r?\n/)) {
+      const parts = line.trim().split(/\s+/);
+      if ((parts[0] === "cpu0" || parts[0] === "cpu6") && parts.length > 2) {
+        next[parts[0]] = parts.slice(1).map(Number).filter((value) => value > 0);
+      }
+    }
+    if (next.cpu0 && next.cpu0.length) freqTables.cpu0 = next.cpu0;
+    if (next.cpu6 && next.cpu6.length) freqTables.cpu6 = next.cpu6;
+  } catch (error) {}
+}
+
+function nearestFreq(device, hz) {
+  const table = freqTables[device] || [];
+  if (!table.length || !Number.isFinite(hz)) return Math.round(hz);
+  return table.reduce((best, item) => Math.abs(item - hz) < Math.abs(best - hz) ? item : best, table[0]);
+}
+
+function curveLevels(card) {
+  return Array.from(card.querySelectorAll('input[data-key="trig"]')).map((input) => {
+    const index = input.dataset.index;
+    const clr = card.querySelector('input[data-key="clr"][data-index="' + index + '"]');
+    const target = card.querySelector('input[data-key="target"][data-index="' + index + '"]');
+    return {
+      index,
+      trig: Number(input.value),
+      clr: clr ? Number(clr.value) : NaN,
+      hz: target ? Number(target.value) : NaN,
+    };
+  }).filter((point) => Number.isFinite(point.trig) && Number.isFinite(point.hz));
+}
+
+function setCurveInput(card, key, index, value) {
+  const input = card.querySelector('input[data-key="' + key + '"][data-index="' + index + '"]');
+  if (input) input.value = String(value);
+}
+
+const CURVE_W = 360;
+const CURVE_H = 230;
+const CURVE_PAD = { l: 52, r: 14, t: 14, b: 28 };
+let curveClipSeq = 0;
+
+function formatHalf(value) {
+  const snapped = Math.round(value * 2) / 2;
+  if (Math.abs(snapped - Math.round(snapped)) < 1e-6) return String(Math.round(snapped));
+  return snapped.toFixed(1);
+}
+
+function snapTemp(value) {
+  if (!Number.isFinite(value)) return 0;
+  const snapped = Math.round(value * 2) / 2;
+  return Math.min(125, Math.max(0, snapped));
+}
+
+function halfTicks(min, max, step) {
+  const ticks = [];
+  const start = Math.ceil((min - 1e-6) / step);
+  const end = Math.floor((max + 1e-6) / step);
+  for (let index = start; index <= end; index += 1) {
+    ticks.push(Math.round(index * step * 10) / 10);
+  }
+  return ticks;
+}
+
+function tempTickStep(span) {
+  const raw = span / 8;
+  for (const step of [0.5, 1, 2, 5, 10, 20, 25]) {
+    if (step + 1e-9 >= raw) return step;
+  }
+  return 25;
+}
+
+function curveScale(range) {
+  const plotW = CURVE_W - CURVE_PAD.l - CURVE_PAD.r;
+  const plotH = CURVE_H - CURVE_PAD.t - CURVE_PAD.b;
+  const spanT = Math.max(1e-6, range.maxT - range.minT);
+  const spanF = Math.max(1, range.maxF - range.minF);
+  return {
+    plotW,
+    plotH,
+    xOf: (temp) => CURVE_PAD.l + (temp - range.minT) / spanT * plotW,
+    yOf: (hz) => CURVE_PAD.t + (1 - (hz - range.minF) / spanF) * plotH,
+    tempAt: (x) => range.minT + (x - CURVE_PAD.l) / plotW * spanT,
+    hzAt: (y) => range.minF + (1 - (y - CURVE_PAD.t) / plotH) * spanF,
+  };
+}
+
+function fitCurveRange(points, table) {
+  const temps = [];
+  for (const point of points) {
+    temps.push(point.trig);
+    if (Number.isFinite(point.clr)) temps.push(point.clr);
+  }
+  return {
+    minT: Math.min(...temps) - 2,
+    maxT: Math.max(...temps) + 2,
+    minF: Math.min(...table),
+    maxF: Math.max(...table),
+  };
+}
+
+function curveLimits(table) {
+  const minF = Math.min(...table);
+  const maxF = Math.max(...table);
+  return {
+    minT: 0,
+    maxT: 125,
+    minF,
+    maxF: minF === maxF ? minF + 1 : maxF,
+    minSpanT: 2,
+  };
+}
+
+function zoomRange(min, max, anchor, factor, limitMin, limitMax, minSpan) {
+  const full = limitMax - limitMin;
+  if (!(full > 0)) return [min, max];
+  let lo = anchor - (anchor - min) * factor;
+  let hi = anchor + (max - anchor) * factor;
+  const spanLimit = Math.min(minSpan, full);
+  if (hi - lo < spanLimit) {
+    lo = anchor - spanLimit / 2;
+    hi = anchor + spanLimit / 2;
+  }
+  if (hi - lo >= full) return [limitMin, limitMax];
+  if (lo < limitMin) {
+    hi += limitMin - lo;
+    lo = limitMin;
+  }
+  if (hi > limitMax) {
+    lo -= hi - limitMax;
+    hi = limitMax;
+  }
+  if (lo < limitMin) lo = limitMin;
+  return [lo, hi];
+}
+
+function shiftRange(min, max, delta, limitMin, limitMax) {
+  let lo = min + delta;
+  let hi = max + delta;
+  if (lo < limitMin) {
+    hi += limitMin - lo;
+    lo = limitMin;
+  }
+  if (hi > limitMax) {
+    lo -= hi - limitMax;
+    hi = limitMax;
+  }
+  if (lo < limitMin) lo = limitMin;
+  return [lo, hi];
+}
+
+function attachCurve(card, device) {
+  const box = document.createElement("div");
+  box.className = "curve-box";
+  const legend = document.createElement("div");
+  legend.className = "curve-legend";
+  legend.innerHTML = '<span><i class="trig"></i>触发</span><span><i class="clr"></i>恢复</span><span class="curve-tools"><button type="button" data-zoom="out">缩小</button><button type="button" data-zoom="in">放大</button><button type="button" data-zoom="reset">复位</button></span>';
+  const readout = document.createElement("div");
+  readout.className = "curve-read";
+  readout.textContent = "拖动圆点。温度按 0.5°C 对齐，频率按这颗处理器的频率表对齐。滚轮或双指缩放温度轴，拖空白处平移。";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("curve");
+  svg.setAttribute("viewBox", "0 0 " + CURVE_W + " " + CURVE_H);
+  box.appendChild(legend);
+  box.appendChild(svg);
+  box.appendChild(readout);
+  const levels = card.querySelector(".levels");
+  card.insertBefore(box, levels);
+  const view = { minT: 0, maxT: 0, minF: 0, maxF: 0 };
+  let fitted = true;
+  const pointers = new Map();
+  const drag = { point: null };
+  let gesture = null;
+
+  const tableOf = () => freqTables[device] || [];
+  function readRange() {
+    const points = curveLevels(card);
+    const table = tableOf();
+    if (!points.length || !table.length) return null;
+    if (fitted) return fitCurveRange(points, table);
+    return { minT: view.minT, maxT: view.maxT, minF: view.minF, maxF: view.maxF };
+  }
+  function commitRange(next) {
+    view.minT = next.minT;
+    view.maxT = next.maxT;
+    view.minF = next.minF;
+    view.maxF = next.maxF;
+    fitted = false;
+  }
+  const paint = () => paintCurve(svg, card, device, readRange());
+  function svgPoint(event) {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: (event.clientX - rect.left) / rect.width * CURVE_W,
+      y: (event.clientY - rect.top) / rect.height * CURVE_H,
+    };
+  }
+  function zoomAt(factor, anchorT) {
+    const range = readRange();
+    const table = tableOf();
+    if (!range || !table.length) return;
+    const lim = curveLimits(table);
+    const [minT, maxT] = zoomRange(range.minT, range.maxT, anchorT, factor, lim.minT, lim.maxT, lim.minSpanT);
+    commitRange({ minT, maxT, minF: lim.minF, maxF: lim.maxF });
+    paint();
+  }
+  function pinchMetrics() {
+    const pts = Array.from(pointers.values());
+    if (pts.length < 2) return null;
+    const a = pts[0];
+    const b = pts[1];
+    return {
+      dist: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+      mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+    };
+  }
+  function beginPinch() {
+    const range = readRange();
+    const metrics = pinchMetrics();
+    if (!range || !metrics) return;
+    const scale = curveScale(range);
+    drag.point = null;
+    svg.classList.remove("panning");
+    gesture = {
+      type: "pinch",
+      dist: metrics.dist,
+      mid: metrics.mid,
+      range,
+      anchorT: scale.tempAt(metrics.mid.x),
+    };
+  }
+  function applyPinch() {
+    if (!gesture || gesture.type !== "pinch") return;
+    const now = pinchMetrics();
+    const table = tableOf();
+    if (!now || !table.length) return;
+    const lim = curveLimits(table);
+    const factor = gesture.dist / now.dist;
+    let [minT, maxT] = zoomRange(gesture.range.minT, gesture.range.maxT, gesture.anchorT, factor, lim.minT, lim.maxT, lim.minSpanT);
+    const scale = curveScale({ minT, maxT, minF: lim.minF, maxF: lim.maxF });
+    const dT = -(now.mid.x - gesture.mid.x) / scale.plotW * (maxT - minT);
+    [minT, maxT] = shiftRange(minT, maxT, dT, lim.minT, lim.maxT);
+    commitRange({ minT, maxT, minF: lim.minF, maxF: lim.maxF });
+    paint();
+  }
+  function hitPoint(at) {
+    let best = null;
+    let bestD = 24;
+    for (const point of svg._points || []) {
+      if (point.x < CURVE_PAD.l - 4 || point.x > CURVE_W - CURVE_PAD.r + 4) continue;
+      if (point.y < CURVE_PAD.t - 4 || point.y > CURVE_H - CURVE_PAD.b + 4) continue;
+      const distance = Math.hypot(point.x - at.x, point.y - at.y);
+      if (distance < bestD) {
+        best = point;
+        bestD = distance;
+      }
+    }
+    return best;
+  }
+
+  svg.addEventListener("pointerdown", (event) => {
+    const at = svgPoint(event);
+    if (!at) return;
+    pointers.set(event.pointerId, at);
+    try {
+      svg.setPointerCapture(event.pointerId);
+    } catch (error) {}
+    if (pointers.size >= 2) {
+      beginPinch();
+      event.preventDefault();
+      return;
+    }
+    const hit = hitPoint(at);
+    if (hit) {
+      drag.point = hit;
+      gesture = { type: "point" };
+      svg.classList.remove("panning");
+    } else {
+      drag.point = null;
+      gesture = { type: "pan", last: at };
+      svg.classList.add("panning");
+    }
+    event.preventDefault();
+  });
+  svg.addEventListener("pointermove", (event) => {
+    if (!pointers.has(event.pointerId)) return;
+    const at = svgPoint(event);
+    if (!at) return;
+    pointers.set(event.pointerId, at);
+    event.preventDefault();
+    if (gesture && gesture.type === "pinch") {
+      applyPinch();
+      return;
+    }
+    if (gesture && gesture.type === "point" && drag.point) {
+      const range = readRange();
+      if (!range) return;
+      const scale = curveScale(range);
+      const x = Math.min(CURVE_W - CURVE_PAD.r, Math.max(CURVE_PAD.l, at.x));
+      const y = Math.min(CURVE_H - CURVE_PAD.b, Math.max(CURVE_PAD.t, at.y));
+      const temp = snapTemp(scale.tempAt(x));
+      const hz = nearestFreq(device, scale.hzAt(y));
+      setCurveInput(card, drag.point.key, drag.point.index, formatHalf(temp));
+      setCurveInput(card, "target", drag.point.index, hz);
+      const label = drag.point.key === "trig" ? "触发" : "恢复";
+      readout.textContent = label + " " + formatHalf(temp) + "°C · " + (hz / 1000000).toFixed(2) + " GHz";
+      paint();
+      return;
+    }
+    if (gesture && gesture.type === "pan") {
+      const range = readRange();
+      const table = tableOf();
+      if (!range || !table.length) return;
+      const lim = curveLimits(table);
+      const dx = at.x - gesture.last.x;
+      gesture.last = at;
+      const scale = curveScale(range);
+      const dT = -dx / scale.plotW * (range.maxT - range.minT);
+      const [minT, maxT] = shiftRange(range.minT, range.maxT, dT, lim.minT, lim.maxT);
+      commitRange({ minT, maxT, minF: lim.minF, maxF: lim.maxF });
+      paint();
+    }
+  });
+  function endPointer(event) {
+    pointers.delete(event.pointerId);
+    if (gesture && gesture.type === "pinch") {
+      if (pointers.size >= 2) return;
+      if (pointers.size === 1) {
+        gesture = { type: "pan", last: pointers.values().next().value };
+        svg.classList.add("panning");
+        return;
+      }
+      gesture = null;
+      svg.classList.remove("panning");
+      return;
+    }
+    gesture = null;
+    drag.point = null;
+    svg.classList.remove("panning");
+  }
+  svg.addEventListener("pointerup", endPointer);
+  svg.addEventListener("pointercancel", endPointer);
+  svg.addEventListener("wheel", (event) => {
+    const at = svgPoint(event);
+    const range = readRange();
+    if (!at || !range || !event.deltaY) return;
+    event.preventDefault();
+    let delta = event.deltaY;
+    if (event.deltaMode === 1) delta *= 16;
+    if (event.deltaMode === 2) delta *= CURVE_H;
+    const scale = curveScale(range);
+    zoomAt(Math.exp(delta * 0.0015), scale.tempAt(at.x));
+  }, { passive: false });
+  for (const button of legend.querySelectorAll("[data-zoom]")) {
+    button.addEventListener("click", () => {
+      if (button.dataset.zoom === "reset") {
+        fitted = true;
+        paint();
+        return;
+      }
+      const range = readRange();
+      if (!range) return;
+      const factor = button.dataset.zoom === "in" ? 1 / 1.5 : 1.5;
+      zoomAt(factor, (range.minT + range.maxT) / 2);
+    });
+  }
+  card.addEventListener("input", (event) => {
+    const key = event.target.dataset && event.target.dataset.key;
+    if (key === "trig" || key === "clr" || key === "target") paint();
+  });
+  paint();
+}
+
+function paintCurve(svg, card, device, range) {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const table = freqTables[device] || [];
+  const points = curveLevels(card);
+  svg._points = [];
+  svg._scale = null;
+  if (!points.length || !table.length || !range) return;
+  const scale = curveScale(range);
+  svg._scale = scale;
+  const { minT, maxT } = range;
+  const ns = "http://www.w3.org/2000/svg";
+  function add(parent, name, attrs) {
+    const node = document.createElementNS(ns, name);
+    for (const key of Object.keys(attrs)) node.setAttribute(key, attrs[key]);
+    parent.appendChild(node);
+    return node;
+  }
+  const clipId = "curve-plot-" + (curveClipSeq += 1);
+  const clip = add(svg, "clipPath", { id: clipId });
+  add(clip, "rect", {
+    x: CURVE_PAD.l,
+    y: CURVE_PAD.t,
+    width: scale.plotW,
+    height: scale.plotH,
+  });
+  const plot = add(svg, "g", { "clip-path": "url(#" + clipId + ")" });
+  const visibleHz = table.filter((hz) => {
+    const y = scale.yOf(hz);
+    return y >= CURVE_PAD.t - 1 && y <= CURVE_H - CURVE_PAD.b + 1;
+  });
+  const rows = visibleHz.length ? visibleHz : table;
+  for (const hz of rows) {
+    const y = scale.yOf(hz);
+    add(plot, "line", { x1: CURVE_PAD.l, y1: y, x2: CURVE_W - CURVE_PAD.r, y2: y, stroke: "#313640", "stroke-width": "1" });
+  }
+  const spanT = Math.max(0.5, maxT - minT);
+  const major = tempTickStep(spanT);
+  const minorPx = scale.plotW / (spanT / 0.5);
+  if (minorPx >= 12 && major > 0.5) {
+    for (const temp of halfTicks(minT, maxT, 0.5)) {
+      const x = scale.xOf(temp);
+      add(plot, "line", { x1: x, y1: CURVE_PAD.t, x2: x, y2: CURVE_H - CURVE_PAD.b, stroke: "#242830", "stroke-width": "1" });
+    }
+  }
+  for (const temp of halfTicks(minT, maxT, major)) {
+    const x = scale.xOf(temp);
+    add(plot, "line", { x1: x, y1: CURVE_PAD.t, x2: x, y2: CURVE_H - CURVE_PAD.b, stroke: "#2a2e36", "stroke-width": "1" });
+    const anchor = x < CURVE_PAD.l + 14 ? "start" : (x > CURVE_W - CURVE_PAD.r - 14 ? "end" : "middle");
+    add(svg, "text", { x: x, y: CURVE_H - 6, fill: "#a3acb8", "font-size": "10", "text-anchor": anchor }).textContent = formatHalf(temp);
+  }
+  if (minorPx >= 4) {
+    for (const temp of halfTicks(minT, maxT, 0.5)) {
+      const x = scale.xOf(temp);
+      const whole = Math.abs(temp - Math.round(temp)) < 1e-6;
+      add(svg, "line", {
+        x1: x,
+        y1: CURVE_H - CURVE_PAD.b,
+        x2: x,
+        y2: CURVE_H - CURVE_PAD.b + (whole ? 8 : 4),
+        stroke: "#6d7682",
+        "stroke-width": "1",
+      });
+    }
+  }
+  const stride = Math.max(1, Math.ceil(rows.length / 4));
+  for (let i = 0; i < rows.length; i += stride) {
+    const hz = rows[i];
+    add(svg, "text", { x: 4, y: scale.yOf(hz) + 3, fill: "#a3acb8", "font-size": "10" }).textContent = (hz / 1000000).toFixed(2);
+  }
+  function line(key, color) {
+    const cmds = [];
+    for (const point of points) {
+      const temp = key === "trig" ? point.trig : point.clr;
+      if (!Number.isFinite(temp)) continue;
+      const x = scale.xOf(temp);
+      const y = scale.yOf(point.hz);
+      cmds.push((cmds.length ? "L" : "M") + x + " " + y);
+      svg._points.push({ key, index: point.index, x, y });
+    }
+    if (cmds.length) add(plot, "path", { d: cmds.join(" "), fill: "none", stroke: color, "stroke-width": "2" });
+  }
+  line("clr", "#3ddc84");
+  line("trig", "#ff6b6b");
+  for (const point of svg._points) {
+    add(plot, "circle", {
+      cx: point.x,
+      cy: point.y,
+      r: "6",
+      fill: point.key === "trig" ? "#ff6b6b" : "#3ddc84",
+      stroke: "#101114",
+      "stroke-width": "1.5",
+    });
+  }
+}
+
 function fillProfile(root, parsed) {
   for (const section of parsed.sections) {
     const card = document.createElement("section");
@@ -265,6 +748,9 @@ function fillProfile(root, parsed) {
         list.appendChild(row);
       }
       card.appendChild(list);
+      if ((device === "cpu0" || device === "cpu6") && kind === "hz" && temp && section.fields.clr) {
+        attachCurve(card, device);
+      }
     }
 
     if (section.fields.compensation) {
@@ -699,10 +1185,10 @@ async function loadSceneEditor() {
   if (sceneIndex.size === 0) throw new Error(liveError || "读取场景说明失败");
   if (stockAssign.size === 0) throw new Error(liveError || "场景表解密失败");
   const listed = hasKsu
-    ? await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf")
+    ? await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf /data/vendor/thermal/config/thermal-*.conf 2>/dev/null")
     : { errno: 0, stdout: await apiGet("files") };
-  if (listed.errno !== 0) throw new Error(listed.stderr || "读取温控文件失败");
-  sceneFiles = Array.from(new Set(listed.stdout.split("\n").map((line) => line.trim().split("/").pop()).filter((name) => name && !name.includes("map")))).sort();
+  if (!listed.stdout || !listed.stdout.trim()) throw new Error(listed.stderr || "读取温控文件失败");
+  sceneFiles = Array.from(new Set(listed.stdout.split(/\r?\n/).map((line) => line.trim().split("/").pop()).filter((name) => confNameOk(name) && name.indexOf("map") < 0))).sort();
   sceneRows = Array.from(sceneIndex.values()).map((row) => ({
     id: row.id,
     names: row.names,
@@ -792,6 +1278,7 @@ async function refresh() {
   setStatus("正在读取策略");
   try {
     dir = moduleDir();
+    await loadFreqs();
     await loadMode();
     await loadCatalog();
     if (modeEl.value === "scene") {
@@ -1024,6 +1511,7 @@ function startLinkProbe() {
 
 let fileNames = [];
 let editedNames = new Set();
+let stockNames = new Set();
 let filesLoaded = false;
 let editorName = "";
 let editorParsed = null;
@@ -1049,6 +1537,22 @@ async function listConfText() {
   return result.stdout || "";
 }
 
+async function stockConfText() {
+  if (!hasKsu) {
+    try {
+      return await apiGet("stockfiles");
+    } catch (error) {
+      return "";
+    }
+  }
+  const result = await exec("ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf 2>/dev/null");
+  return result.stdout || "";
+}
+
+function confNamesIn(text) {
+  return text.split(/\r?\n/).map((line) => line.trim().split("/").pop()).filter(confNameOk);
+}
+
 async function editedConfText() {
   if (!hasKsu) {
     try {
@@ -1057,13 +1561,23 @@ async function editedConfText() {
       return "";
     }
   }
-  const result = await exec("cat '" + dir + "/configs/installed.txt'");
+  const result = await exec("sh '" + dir + "/conf.sh' list");
   return result.errno === 0 ? result.stdout : "";
 }
 
 function renderFileList() {
   const list = document.getElementById("file-list");
+  const template = document.getElementById("file-template");
+  const selected = template.value;
   const query = document.getElementById("file-filter").value.trim().toLowerCase();
+  template.innerHTML = "";
+  for (const name of fileNames) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    if (name === selected) option.selected = true;
+    template.appendChild(option);
+  }
   list.innerHTML = "";
   const names = fileNames.filter((name) => !query || name.toLowerCase().indexOf(query) >= 0);
   if (!names.length) {
@@ -1074,12 +1588,99 @@ function renderFileList() {
     return;
   }
   for (const name of names) {
+    const row = document.createElement("div");
+    row.className = "file-row";
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = editedNames.has(name) ? name + "  已覆盖" : name;
+    button.className = "file-open";
+    let mark = "";
+    if (editedNames.has(name) && stockNames.has(name)) mark = "  已覆盖";
+    else if (editedNames.has(name)) mark = "  新建";
+    button.textContent = name + mark;
     button.addEventListener("click", () => openEditor(name));
-    list.appendChild(button);
+    row.appendChild(button);
+    if (editedNames.has(name)) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "file-delete";
+      remove.textContent = "删除";
+      remove.addEventListener("click", () => deleteConf(name));
+      row.appendChild(remove);
+    }
+    list.appendChild(row);
   }
+}
+
+function normalizeConfName(raw) {
+  let name = raw.trim().replace(/\s+/g, "");
+  if (!name) throw new Error("先写一个名字");
+  if (!name.endsWith(".conf")) name += ".conf";
+  if (name.indexOf("thermal-") !== 0) name = "thermal-" + name;
+  if (!confNameOk(name)) throw new Error("名字只能用字母、数字、点、下划线和横线");
+  if (fileNames.indexOf(name) >= 0) throw new Error("已经有这个文件");
+  return name;
+}
+
+function rememberSceneChoices() {
+  for (const select of document.querySelectorAll("#scene-list select")) {
+    for (const row of sceneRows) {
+      if (row.id === select.dataset.id) row.chosen = select.value;
+    }
+  }
+}
+
+function adoptConfName(name) {
+  if (sceneFiles.indexOf(name) < 0) {
+    sceneFiles.push(name);
+    sceneFiles.sort();
+  }
+  if (!sceneRows.length) return;
+  rememberSceneChoices();
+  renderScenes();
+}
+
+async function dropConfFromScenes(name) {
+  sceneFiles = sceneFiles.filter((item) => item !== name);
+  for (const row of sceneRows) {
+    if (row.chosen === name) row.chosen = stockAssign.get(row.id) || "";
+  }
+  let text = "";
+  if (hasKsu) {
+    const saved = await exec("cat '" + dir + "/scene-map.txt'");
+    text = saved.errno === 0 ? saved.stdout : "";
+  } else {
+    try {
+      text = await apiGet("scenemap");
+    } catch (error) {
+      text = "";
+    }
+  }
+  const lines = [];
+  let changed = false;
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^(\d+)\s+(\S+)/);
+    if (!match) continue;
+    if (match[2] === name) {
+      changed = true;
+      const fallback = stockAssign.get(match[1]) || "";
+      savedAssign.set(match[1], fallback);
+      if (fallback && fallback !== name) lines.push(match[1] + " " + fallback);
+      continue;
+    }
+    lines.push(match[1] + " " + match[2]);
+    savedAssign.set(match[1], match[2]);
+  }
+  if (changed) {
+    await writeFile(dir + "/scene-map.txt", (lines.length ? lines.join("\n") + "\n" : ""));
+    if (appliedMode === "scene") {
+      if (!hasKsu) await apiPost("apply", "");
+      else {
+        const result = await exec("sh '" + dir + "/apply.sh'");
+        if (result.errno !== 0) throw new Error((result.stderr || result.stdout || "场景表更新失败").trim());
+      }
+    }
+  }
+  if (sceneRows.length) renderScenes();
 }
 
 async function loadFileList() {
@@ -1088,8 +1689,10 @@ async function loadFileList() {
   try {
     const listed = await listConfText();
     const edited = await editedConfText();
-    fileNames = Array.from(new Set(listed.split(/\r?\n/).map((line) => line.trim().split("/").pop()).filter(confNameOk))).sort();
-    editedNames = new Set(edited.split("\n").map((line) => line.trim()).filter(confNameOk));
+    const stock = await stockConfText();
+    fileNames = Array.from(new Set(confNamesIn(listed))).sort();
+    editedNames = new Set(confNamesIn(edited));
+    stockNames = new Set(confNamesIn(stock));
     filesLoaded = true;
     renderFileList();
   } catch (error) {
@@ -1104,6 +1707,65 @@ async function readConf(name) {
   const result = await exec("sh '" + dir + "/conf.sh' read '" + name + "'");
   if (result.errno !== 0) throw new Error((result.stderr || result.stdout || "读取失败").trim());
   return result.stdout;
+}
+
+async function deleteConfFile(name) {
+  if (!confNameOk(name)) throw new Error("文件名不对");
+  if (!hasKsu) {
+    const log = await apiPost("dropconf", "", { name: name });
+    return log.trim();
+  }
+  const result = await exec("sh '" + dir + "/conf.sh' delete '" + name + "'");
+  if (result.errno !== 0) throw new Error((result.stderr || result.stdout || "删除失败").trim());
+  return result.stdout.trim();
+}
+
+async function createConf() {
+  const status = document.getElementById("file-create-status");
+  const button = document.getElementById("file-create");
+  button.disabled = true;
+  status.textContent = "正在按模板新建";
+  try {
+    const template = document.getElementById("file-template").value;
+    if (!template) throw new Error("先选一个模板");
+    const name = normalizeConfName(document.getElementById("file-new-name").value);
+    const text = await readConf(template);
+    await writeConf(name, text);
+    fileNames.push(name);
+    fileNames.sort();
+    editedNames.add(name);
+    adoptConfName(name);
+    document.getElementById("file-new-name").value = "";
+    renderFileList();
+    status.textContent = "已新建 " + name + "，控制页的动态场景里可以选它";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteConf(name) {
+  const kind = "删除 " + name + " 的覆盖？新建文件会从列表和场景选择里去掉，原厂文件会恢复成系统自带的那份。";
+  if (!window.confirm(kind)) return;
+  const status = document.getElementById("file-create-status");
+  status.textContent = "正在删除 " + name;
+  try {
+    const result = await deleteConfFile(name);
+    editedNames.delete(name);
+    if (result.indexOf("deleted") >= 0) {
+      fileNames = fileNames.filter((item) => item !== name);
+      await dropConfFromScenes(name);
+    } else if (sceneRows.length) {
+      rememberSceneChoices();
+      renderScenes();
+    }
+    if (editorName === name) closeEditor();
+    renderFileList();
+    status.textContent = result.indexOf("deleted") >= 0 ? "已删除 " + name : "已恢复原厂 " + name;
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 async function writeConf(name, text) {
@@ -1139,6 +1801,7 @@ async function openEditor(name) {
   modal.hidden = false;
   editorName = name;
   try {
+    await loadFreqs();
     const text = await readConf(name);
     if (editorName !== name) return;
     editorParsed = parseProfile(text);
@@ -1189,6 +1852,7 @@ document.getElementById("tab-files").addEventListener("click", () => showPage("f
 document.getElementById("file-filter").addEventListener("input", () => {
   if (filesLoaded) renderFileList();
 });
+document.getElementById("file-create").addEventListener("click", createConf);
 document.getElementById("editor-close").addEventListener("click", closeEditor);
 document.getElementById("editor").addEventListener("click", (event) => {
   if (event.target.id === "editor") closeEditor();

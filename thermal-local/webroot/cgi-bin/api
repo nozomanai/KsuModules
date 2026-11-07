@@ -157,30 +157,52 @@ case "$op" in
     ok
     ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf /data/vendor/thermal/config/thermal-*.conf 2>/dev/null
     ;;
+  stockfiles)
+    ok
+    ls -1 /odm/etc/thermal-*.conf /vendor/etc/thermal-*.conf 2>/dev/null
+    ;;
   edited)
     ok
-    cat "$MOD/configs/installed.txt" 2>/dev/null || true
+    sh "$MOD/conf.sh" list 2>/dev/null || true
     ;;
   readconf)
     name=$(qs_arg name)
-    err="$MOD/configs/.err"
-    mkdir -p "$MOD/configs"
-    if ! sh "$MOD/conf.sh" read "$name" > "$MOD/configs/.read" 2>"$err"; then
+    err="$MOD/generated/.err"
+    mkdir -p "$MOD/generated"
+    if ! sh "$MOD/conf.sh" read "$name" > "$MOD/generated/.read" 2>"$err"; then
       fail 500 "$(cat "$err" 2>/dev/null)"
     fi
     ok
-    cat "$MOD/configs/.read"
+    cat "$MOD/generated/.read"
+    ;;
+  dropconf)
+    name=$(qs_arg name)
+    err="$MOD/generated/.err"
+    mkdir -p "$MOD/generated"
+    if ! sh "$MOD/conf.sh" delete "$name" > "$MOD/generated/.write" 2>"$err"; then
+      fail 500 "$(cat "$err" 2>/dev/null)"
+    fi
+    ok
+    cat "$MOD/generated/.write"
     ;;
   writeconf)
     name=$(qs_arg name)
-    err="$MOD/configs/.err"
-    mkdir -p "$MOD/configs"
-    read_body > "$MOD/configs/.incoming"
-    if ! sh "$MOD/conf.sh" write "$name" < "$MOD/configs/.incoming" > "$MOD/configs/.write" 2>"$err"; then
+    err="$MOD/generated/.err"
+    mkdir -p "$MOD/generated"
+    read_body > "$MOD/generated/.incoming"
+    if ! sh "$MOD/conf.sh" write "$name" < "$MOD/generated/.incoming" > "$MOD/generated/.write" 2>"$err"; then
       fail 500 "$(cat "$err" 2>/dev/null)"
     fi
     ok
-    cat "$MOD/configs/.write"
+    cat "$MOD/generated/.write"
+    ;;
+  freqs)
+    ok
+    printf 'cpu0 '
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies 2>/dev/null
+    printf '\ncpu6 '
+    cat /sys/devices/system/cpu/cpu6/cpufreq/scaling_available_frequencies 2>/dev/null
+    printf '\n'
     ;;
   ping)
     ok

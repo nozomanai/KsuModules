@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>本机温控</title>
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="app.css?v=curve-zoom2">
 </head>
 <body>
   <header>
@@ -75,7 +75,13 @@
   <main id="cards"></main>
   </div>
   <section id="page-files" hidden>
-    <p class="note">点一个温控文件可以查看和修改。保存后加密写入温控目录，并重启温控进程。</p>
+    <p class="note">点一个温控文件可以查看和修改。也可以拿现有文件当模板，新建一份并取名。新建和改过的明文保存在内部存储的 thermal-local/configs。新建的文件可以在控制页的动态场景里选用。原厂文件不能删除，只能去掉自己做过的覆盖。</p>
+    <div class="file-create">
+      <select id="file-template"></select>
+      <input id="file-new-name" type="text" placeholder="新名字，如 night" maxlength="48">
+      <button id="file-create" type="button">按模板新建</button>
+    </div>
+    <p id="file-create-status" class="hint"></p>
     <input id="file-filter" type="search" placeholder="筛选温控文件">
     <div id="file-list"></div>
   </section>
@@ -92,6 +98,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=readconf"></script>
+  <script type="module" src="app.js?v=curve-zoom2"></script>
 </body>
 </html>
