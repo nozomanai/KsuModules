@@ -92,7 +92,7 @@
       <button id="boost-save" type="button" class="primary">保存并应用</button>
     </div>
     <div class="boost-body">
-      <p class="note">滑动和启动时的临时频率上限。到达某一档的温度后用这一档，直到下一档；低于第一档时，这张表不限制升频。性能、均衡、省电是三列。关闭覆盖后这张表也撤掉。</p>
+      <p class="note">滑动、启动、动画、解锁和上滑时的临时频率上限。到达某一档的温度后用这一档，直到下一档；低于第一档时，这张表不限制升频。动画是 4227。解锁上滑是 4512：场景 0 是默认，场景 2 是解锁，场景 11 是上滑。性能服务用哪个场景号，就吃哪一档。性能、均衡、省电是三列。关闭覆盖后这张表也撤掉。</p>
       <p id="boost-status" class="hint">正在读取升频表</p>
       <div id="boost-cards"></div>
     </div>
@@ -121,6 +121,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=freq2"></script>
+  <script type="module" src="app.js?v=freq3"></script>
 </body>
 </html>

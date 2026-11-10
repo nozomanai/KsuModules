@@ -6,6 +6,10 @@ function boostName(hint, scence) {
   if (hint === "4224") return "滑动";
   if (hint === "4225") return "启动";
   if (hint === "4226") return "启动 · 4226";
+  if (hint === "4227") return "动画";
+  if (hint === "4512" && scence === "2") return "解锁";
+  if (hint === "4512" && scence === "11") return "上滑";
+  if (hint === "4512") return "解锁上滑";
   return "Hint " + hint + " · 场景" + scence;
 }
 
@@ -203,15 +207,32 @@ export function mountBoost(api) {
     return result.stdout;
   }
 
+  function hasConfig(list, item) {
+    return list.some((config) => config.hint === item.hint && config.scence === item.scence);
+  }
+
   async function load(kind) {
     setBusy(true);
     try {
       configs = parseBoost(await readText(kind));
+      let added = 0;
+      if (kind !== "default") {
+        const defaults = parseBoost(await readText("default"));
+        for (const item of defaults) {
+          if (hasConfig(configs, item)) continue;
+          configs.push(item);
+          added += 1;
+        }
+      }
       loaded = true;
       render();
-      setStatus(kind === "default"
-        ? "已载入原厂升频表，还没有写入手机。到达触发温度后，滑动或启动的临时上限改成这一档。"
-        : "已读取升频表。到达触发温度后，滑动或启动的临时上限改成这一档。");
+      if (kind === "default") {
+        setStatus("已载入初始升频表，还没有写入手机。到达触发温度后，临时上限改成这一档。");
+      } else if (added) {
+        setStatus("已读取升频表，并补上 " + added + " 项新场景。保存后才会写到手机。");
+      } else {
+        setStatus("已读取升频表。到达触发温度后，临时上限改成这一档。");
+      }
     } catch (error) {
       setStatus(error.message, true);
     } finally {
@@ -236,7 +257,7 @@ export function mountBoost(api) {
         if (result.errno !== 0) throw new Error(outcome || "应用失败");
       }
       if (outcome.indexOf("boost off") >= 0) setStatus("已保存。当前是关闭覆盖，升频表已从手机撤下。");
-      else setStatus("已挂上。性能服务已重启，滑动和启动会按这张表限制升频。");
+      else setStatus("已挂上。性能服务已重启，滑动、启动、动画、解锁和上滑会按这张表限制升频。");
       api.toast("升频表已应用");
     } catch (error) {
       setStatus(error.message, true);

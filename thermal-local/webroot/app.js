@@ -1,5 +1,5 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
-import { mountBoost } from "./boost.js?v=freq2";
+import { mountBoost } from "./boost.js?v=freq3";
 
 const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
 
@@ -915,6 +915,7 @@ let mapVariant = "cn";
 let liveError = "";
 let liveLoaded = false;
 let liveStale = false;
+let sceneUnset = false;
 
 const MAP_SRC = {
   cn: "/vendor/etc/thermal-map.conf",
@@ -1128,10 +1129,15 @@ function markActiveScene() {
 
 function cleanSceneId(text) {
   const line = String(text || "").replace(/^\uFEFF/, "").trim().split(/\r?\n/)[0].trim();
+  if (line === "-1") {
+    sceneUnset = true;
+    return "";
+  }
   return /^\d+$/.test(line) ? line : "";
 }
 
 async function readSconfig() {
+  sceneUnset = false;
   if (!hasKsu) return cleanSceneId(await apiGet("sconfig"));
   const now = await exec("cat /sys/class/thermal/thermal_message/sconfig");
   if (now.errno !== 0) return "";
@@ -1207,6 +1213,9 @@ async function loadCatalog() {
   if (now) {
     activeScene = now;
     liveStale = false;
+  } else if (sceneUnset) {
+    activeScene = "";
+    liveStale = false;
   } else {
     liveStale = true;
   }
@@ -1280,6 +1289,13 @@ function renderLive() {
   const noteEl = document.getElementById("live-note");
   bar.classList.toggle("wait", !liveLoaded);
   bar.classList.toggle("stale", liveStale);
+  if (!activeScene && sceneUnset) {
+    sceneEl.textContent = "还没切换";
+    hintEl.textContent = "多打开几个应用就会恢复正常";
+    fileEl.textContent = liveLoaded ? "仍用默认温控" : "读取中";
+    noteEl.textContent = "";
+    return;
+  }
   if (!activeScene) {
     sceneEl.textContent = liveLoaded ? "读不到" : "读取中";
     hintEl.textContent = "";
@@ -1457,6 +1473,12 @@ setInterval(async () => {
       liveStale = false;
       if (next !== activeScene) {
         activeScene = next;
+        markActiveScene();
+      }
+    } else if (sceneUnset) {
+      liveStale = false;
+      if (activeScene) {
+        activeScene = "";
         markActiveScene();
       }
     } else {
