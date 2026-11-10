@@ -1,0 +1,6 @@
+id=keep-adb
+name=保持 USB 调试
+version=1.0
+versionCode=1
+author=local
+description=开机保持 USB 调试、USB 调试（安全设置，模拟点击）开启，并打开「停用 adb 授权超时功能」（授权不再 7 天后失效）。开机完成后的 60 秒内若被关掉会写回。日志：/data/adb/keep-adb.log
