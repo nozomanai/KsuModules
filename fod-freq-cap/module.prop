@@ -1,6 +1,6 @@
 id=fod-freq-cap
 name=指纹升频封顶
-version=1.1
-versionCode=2
+version=1.3
+versionCode=4
 author=local
-description=按下指纹时 libqc_hal 的 QfpPerfLock 仍提交 0xFFF。性能服务把这个值乘 1000 再向上对齐，大核落到 4204800。本模块把这张表的小核改成 1996MHz、大核改成 2438MHz。日志：/data/adb/fod-freq-cap.log
+description=按下指纹时 libqc_hal 的性能锁表把小核限制在 1996MHz、大核限制在 2438MHz。mi_fboost_enable 在写入 0 之后改成只读，避免 TurboSched 再把它打开。日志：/data/adb/fod-freq-cap.log

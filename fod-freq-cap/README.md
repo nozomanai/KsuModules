@@ -24,7 +24,7 @@
 - `fingerprint.qcom_us.so` 里的 `xiaomi_perf_lock_acquire()`
 - `vendor.xiaomi.hw.touchfeature-service` 在手指按下时持有的约 200ms 性能锁
 
-内核 `metis` 的 `mi_fboost_enable` 会在开机时写成 0。指纹这条 4GHz 路径不依赖它，它是另一条会把频率抬高的开关。
+内核 `metis` 的 `mi_fboost_enable` 是另一条升频开关。这个节点的权限是 `0666`。`TurboSchedManagerService` 在核心应用优化打开时会通过 `kernelFrameBoostEnable()` 把它写回 1，相机库也会写。只在开机时写一次 0，用一会儿之后就会被写回去，封顶就失效。模块写完 0 之后把节点改成 `0444`。
 
 ## 实现
 
@@ -35,6 +35,7 @@
 3. 把表里的 `0xFFF` 写成 1996 或 2438。单位是 MHz，性能服务会自己乘 1000。
 4. 给副本标上原来的 SELinux 上下文，再 bind 回原路径。`libqc_hal.so` 和指纹库用 `vendor_file`，touchfeature 用它自己的执行上下文。
 5. 重启已经在跑的 `mfp-daemon` 和 touchfeature。进程启动时映射的是旧文件，只挂载不够，要等新进程重新打开。
+6. 把 `mi_fboost_enable` 写成 0，再把这个节点改成只读。
 
 `0xFFF` 在三张表里的位置：
 

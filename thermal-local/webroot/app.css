@@ -284,6 +284,13 @@ button:disabled { opacity: 0.55; }
   align-items: end;
 }
 
+.touch-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+
 .index {
   color: var(--muted);
   font-size: 13px;

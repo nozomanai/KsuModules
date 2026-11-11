@@ -41,7 +41,7 @@ function setCpuFreq(raw, cpu, hz) {
 function parseBoost(text) {
   const doc = new DOMParser().parseFromString(text, "text/xml");
   if (doc.querySelector("parsererror")) throw new Error("升频表解析失败");
-  const configs = Array.from(doc.querySelectorAll("Config")).map((node) => ({
+  const configs = Array.from(doc.querySelectorAll("Config")).filter((node) => node.getAttribute("Hint") !== "4229").map((node) => ({
     hint: node.getAttribute("Hint") || "",
     scence: node.getAttribute("Scence") || "0",
     levels: Array.from(node.children).filter((child) => child.tagName === "Child").map((child) => {
@@ -126,13 +126,53 @@ function field(label, value, dataset, table) {
   return wrap;
 }
 
+const TOUCH_DEFAULT = { cpu0: "2400000", cpu6: "2649600" };
+
+function fillFreqSelect(select, table, value) {
+  select.innerHTML = "";
+  for (const hz of freqChoices(table, value)) {
+    const option = document.createElement("option");
+    option.value = hz;
+    option.textContent = freqOptionLabel(hz);
+    select.appendChild(option);
+  }
+  select.value = String(value);
+}
+
+function parseTouch(text) {
+  const touch = { cpu0: "", cpu6: "" };
+  for (const line of String(text || "").split("\n")) {
+    const match = line.match(/^(cpu[06])=(\d+)/);
+    if (match) touch[match[1]] = match[2];
+  }
+  return {
+    cpu0: touch.cpu0 || TOUCH_DEFAULT.cpu0,
+    cpu6: touch.cpu6 || TOUCH_DEFAULT.cpu6,
+  };
+}
+
 export function mountBoost(api) {
   let configs = [];
+  let touch = { cpu0: TOUCH_DEFAULT.cpu0, cpu6: TOUCH_DEFAULT.cpu6 };
   let loaded = false;
   const status = document.getElementById("boost-status");
   const cards = document.getElementById("boost-cards");
   const power = document.getElementById("boost-power");
+  const touchCpu0 = document.getElementById("touch-cpu0");
+  const touchCpu6 = document.getElementById("touch-cpu6");
   const buttons = ["boost-reload", "boost-defaults", "boost-save"].map((id) => document.getElementById(id));
+
+  function showTouch() {
+    fillFreqSelect(touchCpu0, api.freqs("cpu0"), touch.cpu0);
+    fillFreqSelect(touchCpu6, api.freqs("cpu6"), touch.cpu6);
+  }
+
+  touchCpu0.addEventListener("change", () => {
+    touch.cpu0 = touchCpu0.value;
+  });
+  touchCpu6.addEventListener("change", () => {
+    touch.cpu6 = touchCpu6.value;
+  });
 
   function setStatus(text, bad) {
     status.textContent = text;
@@ -188,6 +228,19 @@ export function mountBoost(api) {
   cards.addEventListener("change", remember);
   power.addEventListener("change", render);
 
+  async function readTouch() {
+    if (!api.hasKsu) {
+      try {
+        return await api.apiGet("touchboost");
+      } catch (error) {
+        return "";
+      }
+    }
+    const result = await api.exec("cat '" + api.dir() + "/touch-boost'");
+    if (result.errno !== 0) return "";
+    return result.stdout || "";
+  }
+
   async function readText(kind) {
     const name = kind === "default" ? "boost.default.xml" : "boost.xml";
     if (!api.hasKsu) {
@@ -225,6 +278,9 @@ export function mountBoost(api) {
         }
       }
       loaded = true;
+      if (kind === "default") touch = { cpu0: TOUCH_DEFAULT.cpu0, cpu6: TOUCH_DEFAULT.cpu6 };
+      else touch = parseTouch(await readTouch());
+      showTouch();
       render();
       if (kind === "default") {
         setStatus("已载入初始升频表，还没有写入手机。到达触发温度后，临时上限改成这一档。");
@@ -247,6 +303,9 @@ export function mountBoost(api) {
     try {
       const text = serializeBoost(configs);
       await api.writeFile(api.dir() + "/boost.xml", text);
+      touch.cpu0 = storeHz(touch.cpu0);
+      touch.cpu6 = storeHz(touch.cpu6);
+      await api.writeFile(api.dir() + "/touch-boost", "cpu0=" + touch.cpu0 + "\ncpu6=" + touch.cpu6 + "\n");
       let outcome = "";
       if (!api.hasKsu) {
         outcome = await api.apiPost("boostapply", "");
@@ -257,7 +316,7 @@ export function mountBoost(api) {
         if (result.errno !== 0) throw new Error(outcome || "应用失败");
       }
       if (outcome.indexOf("boost off") >= 0) setStatus("已保存。当前是关闭覆盖，升频表已从手机撤下。");
-      else setStatus("已挂上。性能服务已重启，滑动、启动、动画、解锁和上滑会按这张表限制升频。");
+      else setStatus("已挂上。抬手按单独的一组频率生效。滑动、启动、动画、解锁和上滑仍按模式列限制升频。");
       api.toast("升频表已应用");
     } catch (error) {
       setStatus(error.message, true);

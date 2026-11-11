@@ -92,6 +92,14 @@
       <button id="boost-save" type="button" class="primary">保存并应用</button>
     </div>
     <div class="boost-body">
+      <section class="card" id="touch-boost">
+        <h2>抬手</h2>
+        <p class="note">松手后 500 毫秒的加速上限。只有一组小核和大核，不随性能、均衡、省电切换。</p>
+        <div class="touch-fields">
+          <label class="field"><span>小核</span><select id="touch-cpu0"></select></label>
+          <label class="field"><span>大核</span><select id="touch-cpu6"></select></label>
+        </div>
+      </section>
       <p class="note">滑动、启动、动画、解锁和上滑时的临时频率上限。到达某一档的温度后用这一档，直到下一档；低于第一档时，这张表不限制升频。动画是 4227。解锁上滑是 4512：场景 0 是默认，场景 2 是解锁，场景 11 是上滑。性能服务用哪个场景号，就吃哪一档。性能、均衡、省电是三列。关闭覆盖后这张表也撤掉。</p>
       <p id="boost-status" class="hint">正在读取升频表</p>
       <div id="boost-cards"></div>

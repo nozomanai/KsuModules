@@ -1,4 +1,5 @@
 #!/system/bin/sh
+chmod 0666 /sys/module/metis/parameters/mi_fboost_enable 2>/dev/null || true
 SO=/odm/lib64/hw/fingerprint.qcom_us.so
 QC=/odm/lib64/libqc_hal.so
 TOUCH=/odm/bin/hw/vendor.xiaomi.hw.touchfeature-service

@@ -109,9 +109,16 @@ if pidof vendor.xiaomi.hw.touchfeature-service >/dev/null 2>&1; then
   log "restarted touchfeature pid=$tpid $(grep touchfeature-service /proc/$tpid/maps | head -1)"
 fi
 
-if [ -w /sys/module/metis/parameters/mi_fboost_enable ]; then
-  echo 0 > /sys/module/metis/parameters/mi_fboost_enable
-  log "mi_fboost_enable=$(cat /sys/module/metis/parameters/mi_fboost_enable)"
+FBOOST=/sys/module/metis/parameters/mi_fboost_enable
+if [ -f "$FBOOST" ]; then
+  if [ ! -w "$FBOOST" ]; then
+    chmod 0666 "$FBOOST" 2>/dev/null || true
+  fi
+  echo 0 > "$FBOOST"
+  # The node is mode 0666, so system_server and cameraserver can turn it
+  # back on. Make it read-only after writing 0.
+  chmod 0444 "$FBOOST" 2>/dev/null || true
+  log "mi_fboost_enable=$(cat "$FBOOST")"
 fi
 
 # Finger-down goes through QfpPerfLock::setPerfLock in libqc_hal.so.
@@ -160,10 +167,6 @@ if pidof mfp-daemon >/dev/null 2>&1; then
   sleep 1
   pid=$(pidof mfp-daemon)
   log "restarted pid=$pid $(grep 'libqc_hal.so' /proc/$pid/maps | head -1)"
-fi
-if [ -f "$MODDIR/cap-loop.pid" ]; then
-  kill "$(cat "$MODDIR/cap-loop.pid")" 2>/dev/null || true
-  rm -f "$MODDIR/cap-loop.pid"
 fi
 echo "fod freq cap applied"
 exit 0
