@@ -1,0 +1,1 @@
+allow init hal_touchfeature_xiaomi_default process2 nosuid_transition
