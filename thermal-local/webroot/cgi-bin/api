@@ -121,6 +121,27 @@ case "$op" in
       cat "$target"
     fi
     ;;
+  cpushade)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/cpu-shade.tmp"
+      body=$(tr -d ' \r\n' < "$MOD/cpu-shade.tmp")
+      case "$body" in
+        on|off) ;;
+        *) fail 400 "bad cpu shade" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/cpu-shade"
+      rm -f "$MOD/cpu-shade.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      body=$(tr -d ' \r\n' < "$MOD/cpu-shade" 2>/dev/null)
+      case "$body" in
+        off) printf 'off\n' ;;
+        *) printf 'on\n' ;;
+      esac
+    fi
+    ;;
   gpushade)
     if [ "$REQUEST_METHOD" = "POST" ]; then
       read_body > "$MOD/gpu-shade.tmp"

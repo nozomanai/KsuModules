@@ -1,5 +1,5 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
-import { mountBoost } from "./boost.js?v=freq3";
+import { mountBoost } from "./boost.js?v=cpu1";
 import { mountGpu } from "./gpu.js?v=gpu1";
 
 const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
@@ -13,6 +13,7 @@ function remoteOpForPath(path) {
   if (path.endsWith("/stock-map.txt")) return "stockmap";
   if (path.endsWith("/boost.xml")) return "boost";
   if (path.endsWith("/gpu-shade")) return "gpushade";
+  if (path.endsWith("/cpu-shade")) return "cpushade";
   return "";
 }
 

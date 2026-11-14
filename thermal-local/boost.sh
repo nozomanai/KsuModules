@@ -12,7 +12,9 @@ PERF_DST=/vendor/etc/perf/perfboostsconfig.xml
 PERF_GEN="$MODDIR/generated/perfboostsconfig.xml"
 MODE=$(tr -d ' \r\n' < "$MODDIR/mode" 2>/dev/null)
 GPU=$(tr -d ' \r\n' < "$MODDIR/gpu-shade" 2>/dev/null)
+CPU=$(tr -d ' \r\n' < "$MODDIR/cpu-shade" 2>/dev/null)
 [ "$GPU" = "off" ] || GPU=on
+[ "$CPU" = "off" ] || CPU=on
 
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG" 2>/dev/null || true
@@ -51,7 +53,7 @@ if [ "$overlay" = 1 ]; then
   log "boost mounted"
 fi
 
-if [ "$overlay" = 1 ] || [ "$GPU" = "off" ]; then
+if [ "$overlay" = 1 ] || [ "$GPU" = "off" ] || [ "$CPU" = "off" ]; then
   mkdir -p "$MODDIR/generated"
   perf_ok=0
   if cp -f "$PERF_DST" "$PERF_GEN"; then
@@ -106,6 +108,38 @@ if [ "$overlay" = 1 ] || [ "$GPU" = "off" ]; then
     else
       log "gpu shade lock on"
     fi
+    if [ "$CPU" = "off" ]; then
+      # Status-bar pull on sun raises the CPU clusters for 500 ms.
+      awk '
+        /Id="0x000011A0"/ { id = 1; type = 0; sun = 0 }
+        id && /Type="1"/ { type = 1 }
+        id && /Target="sun"/ { sun = 1 }
+        id && type && sun {
+          gsub(/0x40C00000,[[:space:]]*0x1,[[:space:]]*/, "")
+          gsub(/0x40804000,[[:space:]]*2745,[[:space:]]*/, "")
+          gsub(/0x40804200,[[:space:]]*2649,[[:space:]]*/, "")
+          gsub(/0x40800000,[[:space:]]*1996,[[:space:]]*/, "")
+          gsub(/0x40800200,[[:space:]]*1689,[[:space:]]*/, "")
+        }
+        /\/>/ { id = 0; type = 0; sun = 0 }
+        { print }
+      ' "$PERF_GEN" > "$PERF_GEN.tmp" && mv -f "$PERF_GEN.tmp" "$PERF_GEN"
+      if awk '
+        /Id="0x000011A0"/ { id = 1; type = 0; sun = 0 }
+        id && /Type="1"/ { type = 1 }
+        id && /Target="sun"/ { sun = 1 }
+        id && type && sun && /2745|0x40800000|0x40C00000/ { found = 1 }
+        /\/>/ { id = 0; type = 0; sun = 0 }
+        END { exit found ? 0 : 1 }
+      ' "$PERF_GEN"; then
+        log "cpu shade strip failed"
+        echo "cpu shade strip failed" >&2
+        exit 1
+      fi
+      log "cpu shade boost off"
+    else
+      log "cpu shade boost on"
+    fi
     chown root:root "$PERF_GEN" 2>/dev/null || true
     chmod 644 "$PERF_GEN"
     chcon u:object_r:vendor_configs_file:s0 "$PERF_GEN" 2>/dev/null || true
@@ -118,8 +152,8 @@ if [ "$overlay" = 1 ] || [ "$GPU" = "off" ]; then
   else
     log "perfboost copy failed"
   fi
-  if [ "$GPU" = "off" ] && [ "$perf_ok" != 1 ]; then
-    echo "gpu shade mount failed" >&2
+  if { [ "$GPU" = "off" ] || [ "$CPU" = "off" ]; } && [ "$perf_ok" != 1 ]; then
+    echo "shade mount failed" >&2
     exit 1
   fi
   if [ "$(getprop init.svc.perf2-hal-1-0 2>/dev/null)" = "running" ]; then
@@ -128,6 +162,11 @@ if [ "$overlay" = 1 ] || [ "$GPU" = "off" ]; then
   fi
 fi
 
+if [ "$CPU" = "off" ]; then
+  echo "cpu shade off"
+else
+  echo "cpu shade on"
+fi
 if [ "$GPU" = "off" ]; then
   echo "gpu shade off"
 else

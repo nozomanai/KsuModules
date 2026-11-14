@@ -93,6 +93,16 @@
       <button id="boost-save" type="button" class="primary">保存并应用</button>
     </div>
     <div class="boost-body">
+      <section class="card" id="shade-cpu">
+        <div class="switch-row">
+          <div>
+            <h2>下拉通知中心</h2>
+            <p class="note">下拉状态栏时，性能服务把小核抬到 2745MHz、大核抬到 2649MHz，大约半秒。关掉后不再写这组 CPU 频率。抬手的那一组不受这个开关影响。升频表关闭覆盖时，这个开关仍然生效。</p>
+          </div>
+          <button id="cpu-shade" class="switch on" type="button" role="switch" aria-checked="true" aria-label="下拉通知中心 CPU 升频"></button>
+        </div>
+        <p id="cpu-shade-status" class="hint">正在读取</p>
+      </section>
       <section class="card" id="touch-boost">
         <h2>抬手</h2>
         <p class="note">松手后 500 毫秒的加速上限。只有一组小核和大核，不随性能、均衡、省电切换。</p>
@@ -142,6 +152,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=gpu1"></script>
+  <script type="module" src="app.js?v=cpu1"></script>
 </body>
 </html>

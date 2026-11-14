@@ -160,7 +160,11 @@ export function mountBoost(api) {
   const power = document.getElementById("boost-power");
   const touchCpu0 = document.getElementById("touch-cpu0");
   const touchCpu6 = document.getElementById("touch-cpu6");
+  const shadeButton = document.getElementById("cpu-shade");
+  const shadeStatus = document.getElementById("cpu-shade-status");
   const buttons = ["boost-reload", "boost-defaults", "boost-save"].map((id) => document.getElementById(id));
+  let shadeOn = true;
+  let shadeLoaded = false;
 
   function showTouch() {
     fillFreqSelect(touchCpu0, api.freqs("cpu0"), touch.cpu0);
@@ -183,7 +187,77 @@ export function mountBoost(api) {
     buttons.forEach((button) => {
       button.disabled = busy;
     });
+    shadeButton.disabled = busy;
   }
+
+  function paintShade() {
+    shadeButton.classList.toggle("on", shadeOn);
+    shadeButton.setAttribute("aria-checked", shadeOn ? "true" : "false");
+  }
+
+  function setShadeStatus(text, bad) {
+    shadeStatus.textContent = text;
+    shadeStatus.style.color = bad ? "var(--danger)" : "var(--muted)";
+  }
+
+  async function readShadeOn() {
+    if (!api.hasKsu) {
+      const text = await api.apiGet("cpushade");
+      return text.trim() !== "off";
+    }
+    const result = await api.exec("cat '" + api.dir() + "/cpu-shade'");
+    if (result.errno !== 0 || !result.stdout) return true;
+    return result.stdout.trim() !== "off";
+  }
+
+  async function applyBoost() {
+    if (!api.hasKsu) {
+      const outcome = await api.apiPost("boostapply", "");
+      if (outcome.indexOf("boost ") < 0 && outcome.indexOf("cpu shade ") < 0) {
+        throw new Error(outcome.trim() || "应用失败");
+      }
+      return outcome;
+    }
+    const result = await api.exec("sh '" + api.dir() + "/boost.sh'");
+    const outcome = ((result.stdout || "") + "\n" + (result.stderr || "")).trim();
+    if (result.errno !== 0) throw new Error(outcome || "应用失败");
+    return outcome;
+  }
+
+  async function applyShade(next) {
+    if (!shadeLoaded || shadeButton.disabled) return;
+    const previous = shadeOn;
+    shadeOn = next;
+    paintShade();
+    shadeButton.disabled = true;
+    setShadeStatus(next ? "正在打开下拉通知的 CPU 升频" : "正在关闭下拉通知的 CPU 升频");
+    try {
+      await api.writeFile(api.dir() + "/cpu-shade", (next ? "on" : "off") + "\n");
+      const outcome = await applyBoost();
+      const mark = next ? "cpu shade on" : "cpu shade off";
+      if (outcome.indexOf(mark) < 0) throw new Error(outcome.trim() || "应用失败");
+      setShadeStatus(next
+        ? "已打开。下拉通知中心时，小核会到 2745MHz，大核会到 2649MHz。"
+        : "已关闭。下拉通知中心不再写这组 CPU 频率。");
+      api.toast(next ? "下拉通知 CPU 升频已打开" : "下拉通知 CPU 升频已关闭");
+    } catch (error) {
+      shadeOn = previous;
+      paintShade();
+      try {
+        await api.writeFile(api.dir() + "/cpu-shade", (previous ? "on" : "off") + "\n");
+      } catch (writeError) {
+        setShadeStatus(error.message, true);
+        api.toast(error.message);
+        return;
+      }
+      setShadeStatus(error.message, true);
+      api.toast(error.message);
+    } finally {
+      shadeButton.disabled = false;
+    }
+  }
+
+  shadeButton.addEventListener("click", () => applyShade(!shadeOn));
 
   function render() {
     const mode = Number(power.value);
@@ -331,5 +405,21 @@ export function mountBoost(api) {
   document.getElementById("boost-save").addEventListener("click", save);
   return () => {
     if (!loaded) load("current");
+    if (!shadeLoaded) {
+      shadeButton.disabled = true;
+      setShadeStatus("正在读取");
+      readShadeOn().then((on) => {
+        shadeOn = on;
+        shadeLoaded = true;
+        paintShade();
+        setShadeStatus(on
+          ? "开着。下拉通知中心时，小核会到 2745MHz，大核会到 2649MHz。"
+          : "关着。下拉通知中心不再写这组 CPU 频率。");
+      }).catch((error) => {
+        setShadeStatus(error.message, true);
+      }).finally(() => {
+        shadeButton.disabled = false;
+      });
+    }
   };
 }
