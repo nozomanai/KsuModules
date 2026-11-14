@@ -121,6 +121,27 @@ case "$op" in
       cat "$target"
     fi
     ;;
+  gpushade)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/gpu-shade.tmp"
+      body=$(tr -d ' \r\n' < "$MOD/gpu-shade.tmp")
+      case "$body" in
+        on|off) ;;
+        *) fail 400 "bad gpu shade" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/gpu-shade"
+      rm -f "$MOD/gpu-shade.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      body=$(tr -d ' \r\n' < "$MOD/gpu-shade" 2>/dev/null)
+      case "$body" in
+        off) printf 'off\n' ;;
+        *) printf 'on\n' ;;
+      esac
+    fi
+    ;;
   boostapply)
     result=$(sh "$MOD/boost.sh" 2>&1)
     code=$?

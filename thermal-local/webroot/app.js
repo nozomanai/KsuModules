@@ -1,5 +1,6 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
 import { mountBoost } from "./boost.js?v=freq3";
+import { mountGpu } from "./gpu.js?v=gpu1";
 
 const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
 
@@ -11,6 +12,7 @@ function remoteOpForPath(path) {
   if (path.endsWith("/setting.xml")) return "setting";
   if (path.endsWith("/stock-map.txt")) return "stockmap";
   if (path.endsWith("/boost.xml")) return "boost";
+  if (path.endsWith("/gpu-shade")) return "gpushade";
   return "";
 }
 
@@ -1587,17 +1589,30 @@ const openBoost = mountBoost({
   freqs: (device) => freqTables[device] || [],
 });
 
+const openGpu = mountGpu({
+  hasKsu,
+  exec,
+  apiGet,
+  apiPost,
+  writeFile,
+  toast,
+  dir: () => dir,
+});
+
 function showPage(page) {
   document.getElementById("page-control").hidden = page !== "control";
   document.getElementById("page-files").hidden = page !== "files";
   document.getElementById("page-boost").hidden = page !== "boost";
+  document.getElementById("page-gpu").hidden = page !== "gpu";
   document.getElementById("control-head").hidden = page !== "control";
   document.getElementById("boost-bar").hidden = page !== "boost";
   document.getElementById("tab-control").classList.toggle("on", page === "control");
   document.getElementById("tab-files").classList.toggle("on", page === "files");
   document.getElementById("tab-boost").classList.toggle("on", page === "boost");
+  document.getElementById("tab-gpu").classList.toggle("on", page === "gpu");
   if (page === "files" && !filesLoaded) loadFileList();
   if (page === "boost") openBoost();
+  if (page === "gpu") openGpu();
 }
 
 async function listConfText() {
@@ -1919,6 +1934,7 @@ async function saveEditor() {
 document.getElementById("tab-control").addEventListener("click", () => showPage("control"));
 document.getElementById("tab-files").addEventListener("click", () => showPage("files"));
 document.getElementById("tab-boost").addEventListener("click", () => showPage("boost"));
+document.getElementById("tab-gpu").addEventListener("click", () => showPage("gpu"));
 document.getElementById("file-filter").addEventListener("input", () => {
   if (filesLoaded) renderFileList();
 });
