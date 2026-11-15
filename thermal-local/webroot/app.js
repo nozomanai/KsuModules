@@ -1,6 +1,6 @@
 import { exec, toast, moduleInfo } from "./kernelsu.js";
-import { mountBoost } from "./boost.js?v=cpu1";
-import { mountGpu } from "./gpu.js?v=gpu1";
+import { mountBoost } from "./boost.js?v=perf1";
+import { mountPerf } from "./perfboost.js?v=perf3";
 
 const hasKsu = typeof globalThis.ksu === "object" && globalThis.ksu && typeof globalThis.ksu.exec === "function";
 
@@ -14,6 +14,10 @@ function remoteOpForPath(path) {
   if (path.endsWith("/boost.xml")) return "boost";
   if (path.endsWith("/gpu-shade")) return "gpushade";
   if (path.endsWith("/cpu-shade")) return "cpushade";
+  if (path.endsWith("/gpu-recents")) return "gpurecents";
+  if (path.endsWith("/cpu-recents")) return "cpurecents";
+  if (path.endsWith("/cpu-unlock")) return "cpuunlock";
+  if (path.endsWith("/cpu-anim")) return "cpuanim";
   return "";
 }
 
@@ -1590,7 +1594,7 @@ const openBoost = mountBoost({
   freqs: (device) => freqTables[device] || [],
 });
 
-const openGpu = mountGpu({
+const openPerf = mountPerf({
   hasKsu,
   exec,
   apiGet,
@@ -1604,16 +1608,16 @@ function showPage(page) {
   document.getElementById("page-control").hidden = page !== "control";
   document.getElementById("page-files").hidden = page !== "files";
   document.getElementById("page-boost").hidden = page !== "boost";
-  document.getElementById("page-gpu").hidden = page !== "gpu";
+  document.getElementById("page-perf").hidden = page !== "perf";
   document.getElementById("control-head").hidden = page !== "control";
   document.getElementById("boost-bar").hidden = page !== "boost";
   document.getElementById("tab-control").classList.toggle("on", page === "control");
   document.getElementById("tab-files").classList.toggle("on", page === "files");
   document.getElementById("tab-boost").classList.toggle("on", page === "boost");
-  document.getElementById("tab-gpu").classList.toggle("on", page === "gpu");
+  document.getElementById("tab-perf").classList.toggle("on", page === "perf");
   if (page === "files" && !filesLoaded) loadFileList();
   if (page === "boost") openBoost();
-  if (page === "gpu") openGpu();
+  if (page === "perf") openPerf();
 }
 
 async function listConfText() {
@@ -1935,7 +1939,7 @@ async function saveEditor() {
 document.getElementById("tab-control").addEventListener("click", () => showPage("control"));
 document.getElementById("tab-files").addEventListener("click", () => showPage("files"));
 document.getElementById("tab-boost").addEventListener("click", () => showPage("boost"));
-document.getElementById("tab-gpu").addEventListener("click", () => showPage("gpu"));
+document.getElementById("tab-perf").addEventListener("click", () => showPage("perf"));
 document.getElementById("file-filter").addEventListener("input", () => {
   if (filesLoaded) renderFileList();
 });

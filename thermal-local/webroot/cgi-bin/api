@@ -142,6 +142,90 @@ case "$op" in
       esac
     fi
     ;;
+  cpurecents)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/cpu-recents.tmp"
+      body=$(tr -d ' \r\n' < "$MOD/cpu-recents.tmp")
+      case "$body" in
+        on|off) ;;
+        *) fail 400 "bad cpu recents" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/cpu-recents"
+      rm -f "$MOD/cpu-recents.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      body=$(tr -d ' \r\n' < "$MOD/cpu-recents" 2>/dev/null)
+      case "$body" in
+        off) printf 'off\n' ;;
+        *) printf 'on\n' ;;
+      esac
+    fi
+    ;;
+  cpuanim)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/cpu-anim.tmp"
+      body=$(tr -d ' \r\n' < "$MOD/cpu-anim.tmp")
+      case "$body" in
+        on|off) ;;
+        *) fail 400 "bad cpu anim" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/cpu-anim"
+      rm -f "$MOD/cpu-anim.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      body=$(tr -d ' \r\n' < "$MOD/cpu-anim" 2>/dev/null)
+      case "$body" in
+        off) printf 'off\n' ;;
+        *) printf 'on\n' ;;
+      esac
+    fi
+    ;;
+  cpuunlock)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/cpu-unlock.tmp"
+      body=$(tr -d ' \r\n' < "$MOD/cpu-unlock.tmp")
+      case "$body" in
+        on|off) ;;
+        *) fail 400 "bad cpu unlock" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/cpu-unlock"
+      rm -f "$MOD/cpu-unlock.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      body=$(tr -d ' \r\n' < "$MOD/cpu-unlock" 2>/dev/null)
+      case "$body" in
+        off) printf 'off\n' ;;
+        *) printf 'on\n' ;;
+      esac
+    fi
+    ;;
+  gpurecents)
+    if [ "$REQUEST_METHOD" = "POST" ]; then
+      read_body > "$MOD/gpu-recents.tmp"
+      body=$(tr -d ' \r\n' < "$MOD/gpu-recents.tmp")
+      case "$body" in
+        on|off) ;;
+        *) fail 400 "bad gpu recents" ;;
+      esac
+      printf '%s\n' "$body" > "$MOD/gpu-recents"
+      rm -f "$MOD/gpu-recents.tmp"
+      ok
+      printf '%s\n' "$body"
+    else
+      ok
+      body=$(tr -d ' \r\n' < "$MOD/gpu-recents" 2>/dev/null)
+      case "$body" in
+        off) printf 'off\n' ;;
+        *) printf 'on\n' ;;
+      esac
+    fi
+    ;;
   gpushade)
     if [ "$REQUEST_METHOD" = "POST" ]; then
       read_body > "$MOD/gpu-shade.tmp"

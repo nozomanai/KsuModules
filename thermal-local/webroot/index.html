@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>本机温控</title>
-  <link rel="stylesheet" href="app.css?v=gpu1">
+  <link rel="stylesheet" href="app.css?v=perf1">
 </head>
 <body>
   <header>
@@ -16,7 +16,7 @@
     <div class="menu-tabs">
       <button id="tab-control" class="tab on" type="button">控制</button>
       <button id="tab-boost" class="tab" type="button">升频</button>
-      <button id="tab-gpu" class="tab" type="button">GPU</button>
+      <button id="tab-perf" class="tab" type="button">perfboost</button>
       <button id="tab-files" class="tab" type="button">配置</button>
     </div>
   </nav>
@@ -93,16 +93,6 @@
       <button id="boost-save" type="button" class="primary">保存并应用</button>
     </div>
     <div class="boost-body">
-      <section class="card" id="shade-cpu">
-        <div class="switch-row">
-          <div>
-            <h2>下拉通知中心</h2>
-            <p class="note">下拉状态栏时，性能服务把小核抬到 2745MHz、大核抬到 2649MHz，大约半秒。关掉后不再写这组 CPU 频率。抬手的那一组不受这个开关影响。升频表关闭覆盖时，这个开关仍然生效。</p>
-          </div>
-          <button id="cpu-shade" class="switch on" type="button" role="switch" aria-checked="true" aria-label="下拉通知中心 CPU 升频"></button>
-        </div>
-        <p id="cpu-shade-status" class="hint">正在读取</p>
-      </section>
       <section class="card" id="touch-boost">
         <h2>抬手</h2>
         <p class="note">松手后 500 毫秒的加速上限。只有一组小核和大核，不随性能、均衡、省电切换。</p>
@@ -116,16 +106,66 @@
       <div id="boost-cards"></div>
     </div>
   </section>
-  <section id="page-gpu" hidden>
+  <section id="page-perf" hidden>
     <section class="card">
       <div class="switch-row">
         <div>
-          <h2>下拉通知中心锁 900MHz</h2>
+          <h2>下拉通知中心 CPU</h2>
+          <p class="note">下拉状态栏时，性能服务把小核抬到 2745MHz、大核抬到 2649MHz，大约半秒。关掉后不再写这组 CPU 频率。抬手的那一组不受这个开关影响。升频表关闭覆盖时，这个开关仍然生效。</p>
+        </div>
+        <button id="cpu-shade" class="switch on" type="button" role="switch" aria-checked="true" aria-label="下拉通知中心 CPU 升频"></button>
+      </div>
+      <p id="cpu-shade-status" class="hint">正在读取</p>
+    </section>
+    <section class="card">
+      <div class="switch-row">
+        <div>
+          <h2>下拉通知中心 GPU</h2>
           <p class="note">下拉状态栏时，性能服务把 GPU 的最低和最高功耗等级都写成 3，频率只能停在 900MHz，大约半秒。关掉后，这次下拉不再写这两个等级。CPU 升频不动。升频页关闭覆盖时，这个开关仍然生效。</p>
         </div>
-        <button id="gpu-shade" class="switch on" type="button" role="switch" aria-checked="true" aria-label="下拉通知中心锁 900MHz"></button>
+        <button id="gpu-shade" class="switch on" type="button" role="switch" aria-checked="true" aria-label="下拉通知中心 GPU 升频"></button>
       </div>
-      <p id="gpu-status" class="hint">正在读取</p>
+      <p id="gpu-shade-status" class="hint">正在读取</p>
+    </section>
+    <section class="card">
+      <div class="switch-row">
+        <div>
+          <h2>多任务 CPU</h2>
+          <p class="note">从应用进入多任务时，性能服务把大核最低频率写成 1996MHz、超大核写成 1689MHz，最高频率写成 2745 和 2649，大约半秒。横屏进入时最低频率是 2400 和 2246。从桌面进入不会触发。关掉后不再写这组 CPU 频率。解锁画面不受影响。</p>
+        </div>
+        <button id="cpu-recents" class="switch on" type="button" role="switch" aria-checked="true" aria-label="多任务 CPU 升频"></button>
+      </div>
+      <p id="cpu-recents-status" class="hint">正在读取</p>
+    </section>
+    <section class="card">
+      <div class="switch-row">
+        <div>
+          <h2>多任务 GPU</h2>
+          <p class="note">从应用进入多任务时，GPU 最低功耗等级写成 5、最高写成 2，地板是 734MHz，天花板是 967MHz，大约半秒。横屏进入时最低和最高都写成 2，停在 967MHz。从桌面进入不会触发。关掉后不再写这些等级。解锁画面不受影响。</p>
+        </div>
+        <button id="gpu-recents" class="switch on" type="button" role="switch" aria-checked="true" aria-label="多任务 GPU 升频"></button>
+      </div>
+      <p id="gpu-recents-status" class="hint">正在读取</p>
+    </section>
+    <section class="card">
+      <div class="switch-row">
+        <div>
+          <h2>解锁 CPU</h2>
+          <p class="note">解锁时，性能服务把大核最低频率写成 1996MHz、超大核写成 1689MHz，最高频率写成 2745 和 2649，大约半秒。关掉后不再写这组 CPU 频率。GPU 仍会到 734MHz。多任务和抬手不受影响。</p>
+        </div>
+        <button id="cpu-unlock" class="switch on" type="button" role="switch" aria-checked="true" aria-label="解锁 CPU 升频"></button>
+      </div>
+      <p id="cpu-unlock-status" class="hint">正在读取</p>
+    </section>
+    <section class="card">
+      <div class="switch-row">
+        <div>
+          <h2>动画 CPU</h2>
+          <p class="note">同一份性能表里的 0x1083。解锁动画走这条，应用打开和关闭等窗口动画也共用。它把小核最低写成 1996MHz、大核最低写成 1689MHz，最高写成 2745 和 2649，大约 0.4 秒。关掉后不再写这组 CPU 频率。解锁那条 Type 2 和抬手不受影响。</p>
+        </div>
+        <button id="cpu-anim" class="switch on" type="button" role="switch" aria-checked="true" aria-label="动画 CPU 升频"></button>
+      </div>
+      <p id="cpu-anim-status" class="hint">正在读取</p>
     </section>
   </section>
   <section id="page-files" hidden>
@@ -152,6 +192,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="app.js?v=cpu1"></script>
+  <script type="module" src="app.js?v=perf3"></script>
 </body>
 </html>
