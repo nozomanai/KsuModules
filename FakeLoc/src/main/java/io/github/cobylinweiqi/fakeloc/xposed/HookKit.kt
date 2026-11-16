@@ -27,6 +27,7 @@ internal object HookKit {
         log(Log.ERROR, tag, "$message: ${throwable.javaClass.simpleName}: ${throwable.message}")
 
     fun log(priority: Int, tag: String, message: String) {
+        if (!HookState.mayLog()) return
         runCatching { Log.println(priority, "$ROOT_TAG/$tag", message) }
     }
 

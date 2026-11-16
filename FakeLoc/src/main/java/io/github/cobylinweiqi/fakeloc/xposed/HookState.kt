@@ -99,6 +99,13 @@ internal object HookState {
 
     fun packageName(): String? = processPackage
 
+    /**
+     * An app can read logcat entries written by its own uid. `system_server`
+     * (`android`) is a different uid, so its lines stay available for diagnosis.
+     * [verbose] re-opens the app-process log on purpose.
+     */
+    fun mayLog(): Boolean = verbose || processPackage == "android"
+
     fun position(): Pair<Double, Double> {
         val cfg = config()
         if (!cfg.driftEnabled || cfg.driftRadiusMeters <= 0.0) {

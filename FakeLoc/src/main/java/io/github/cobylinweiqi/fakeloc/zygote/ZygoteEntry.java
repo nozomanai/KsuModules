@@ -4,6 +4,8 @@ import android.util.Log;
 
 import com.v7878.zygisk.ZygoteLoader;
 
+import io.github.cobylinweiqi.fakeloc.xposed.HookState;
+
 public final class ZygoteEntry {
     private ZygoteEntry() {
     }
@@ -12,6 +14,7 @@ public final class ZygoteEntry {
         try {
             HookRuntime.preload(ZygoteLoader.getModuleDir());
         } catch (Throwable error) {
+            // Zygote, before the app uid exists. The target app cannot read this.
             Log.e("FakeLoc", "premain", error);
         }
     }
@@ -20,7 +23,7 @@ public final class ZygoteEntry {
         try {
             HookRuntime.install(ZygoteLoader.getPackageName(), ZygoteLoader.getProcessName());
         } catch (Throwable error) {
-            Log.e("FakeLoc", "main", error);
+            if (HookState.INSTANCE.mayLog()) Log.e("FakeLoc", "main", error);
         }
     }
 }

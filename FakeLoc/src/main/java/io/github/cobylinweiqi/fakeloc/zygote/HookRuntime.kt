@@ -35,8 +35,8 @@ object HookRuntime {
     @JvmStatic
     fun install(packageName: String?, processName: String?) {
         val pkg = packageName ?: return
-        HookKit.info(TAG, "install $pkg process=$processName")
         HookState.init(pkg)
+        HookKit.info(TAG, "install $pkg process=$processName")
         when (pkg) {
             MANAGER -> HookKit.info(TAG, "manager process left alone")
             "android" -> installSystem()

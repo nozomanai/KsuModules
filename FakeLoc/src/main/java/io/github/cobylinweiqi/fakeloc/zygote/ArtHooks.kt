@@ -2,6 +2,7 @@ package io.github.cobylinweiqi.fakeloc.zygote
 
 import android.util.Log
 import com.v7878.unsafe.invoke.EmulatedStackFrame
+import io.github.cobylinweiqi.fakeloc.xposed.HookState
 import com.v7878.unsafe.invoke.Transformers
 import com.v7878.vmtools.HookTransformer
 import com.v7878.vmtools.Hooks
@@ -36,7 +37,7 @@ object ArtHooks {
                     }
                 } catch (error: Throwable) {
                     if (call.proceeded) throw error
-                    Log.e(TAG, "hook ${executable.name}", error)
+                    if (HookState.mayLog()) Log.e(TAG, "hook ${executable.name}", error)
                     call.proceed()
                 }
             },
