@@ -21,6 +21,10 @@ pluginManagement {
     }
 }
 
+plugins {
+    id("com.android.application") version "9.4.1" apply false
+}
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -37,3 +41,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "FakeLoc"
+include(":probe")

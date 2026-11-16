@@ -1,5 +1,5 @@
 plugins {
-    id("com.android.application") version "9.4.1"
+    id("com.android.application")
     id("com.github.aerath-stuff.ZygoteLoader") version "2a2160f"
 }
 
