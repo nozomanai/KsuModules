@@ -1,0 +1,439 @@
+package io.github.cobylinweiqi.fakeloc.core
+
+/**
+ * City code handed to the map SDK when the configuration has none.
+ *
+ * This is **not** an administrative division code. [addrCityCode] answers the
+ * SDK's own `getCityCode()`, and the consumers are app-internal lookup tables:
+ * CCB's employee app takes the value verbatim out of `BDLocation.getCityCode()`
+ * and puts it in the `cityCode` field of the reply it hands to its check-in H5
+ * page, where the page matches it against a table keyed by CCB's own city
+ * numbers. Measured 2026-11-12: with a real fix that page received `194` and
+ * one particular city; with the spoofed one the field was missing entirely and
+ * the page rendered "地理位置获取失败".
+ *
+ * Tencent's WebService has no equivalent field — `/ws/geocoder/v1/` returns the
+ * administrative code (`156430600` for 岳阳), which is a *different* namespace
+ * and fails such a lookup. So the value is pinned here instead of derived, and
+ * a configuration that does carry one still wins (see [SpoofConfig.addressFor]).
+ */
+private const val DEFAULT_CITY_CODE = "194"
+
+/**
+ * The whole spoofing state, shared between the manager UI and the hooks.
+ *
+ * It is deliberately a single object serialised into a single preference key:
+ * the hook side then needs one change listener and one cached decode instead of
+ * a dozen independent keys, and adding a field never means touching two code
+ * paths that could drift apart.
+ *
+ * Defaults are sensible for a first run: spoofing off, Tiananmen Square as the
+ * anchor (Beijing, 39.9087 / 116.3975), a plausible 5 m accuracy, mock traces
+ * hidden.
+ */
+data class SpoofConfig(
+    /** Master switch. Everything is a no-op while this is false. */
+    val playing: Boolean = false,
+
+    /** Anchor point, in decimal degrees. */
+    val latitude: Double = 39.908700,
+    val longitude: Double = 116.397500,
+
+    val useAccuracy: Boolean = true,
+    /** Horizontal accuracy in metres. */
+    val accuracy: Float = 5.0f,
+
+    val useAltitude: Boolean = false,
+    /** Metres above the WGS-84 ellipsoid. */
+    val altitude: Double = 44.0,
+
+    val useSpeed: Boolean = false,
+    /** Ground speed in metres per second. */
+    val speed: Float = 1.4f,
+
+    /** Random-walk around the anchor so a recorded track does not look frozen. */
+    val driftEnabled: Boolean = false,
+    val driftRadiusMeters: Double = 40.0,
+    val driftSpeedMps: Float = 1.4f,
+
+    /**
+     * Neutralise every mock-location signal a detector can read:
+     * `Location.isFromMockProvider()`, `Location.isMock()`, the
+     * `mock_location` secure setting and the `OP_MOCK_LOCATION` app-op.
+     */
+    val antiMock: Boolean = true,
+
+    /**
+     * Deny the target process every raw source it could use to work out a real
+     * position by itself: WiFi scan results, cell information, and raw GNSS
+     * (NMEA sentences, measurements, navigation messages).
+     *
+     * This exists because rewriting the platform's fixes is not always enough.
+     * A location SDK with its own engine — Amap's, for instance — can ignore what
+     * `LocationManager` hands it and either solve its own position from raw GNSS
+     * or send a WiFi/cell fingerprint to its own server and take the coordinates
+     * that come back. Neither can be rewritten from inside the app, and the
+     * symptom is a map that jumps to the injected position and then drifts back
+     * to the real one seconds later.
+     *
+     * On by default: without it the module only wins against apps that read the
+     * platform's location. Turn it off if an app starts reporting that it cannot
+     * get a fix at all.
+     */
+    val strictSources: Boolean = true,
+
+    /**
+     * Hook the map and location SDKs inside the target app.
+     *
+     * Covers Amap, Baidu and Tencent — the three whose SDKs carry their own
+     * positioning engine and publish results through their own classes rather
+     * than through `android.location`. [strictSources] blocks the *inputs* such an
+     * engine would use; this one takes over its *output*, which is the only thing
+     * that helps when the SDK has already computed a fix before the inputs were
+     * cut, or when it caches one.
+     *
+     * On by default: it costs nothing in an app that uses none of the three,
+     * because every channel is resolved by name and skipped when absent.
+     *
+     * Turn it off for the rare app that breaks on it — a mapping library that
+     * relies on `getLatitude()` returning what it wrote a moment ago will see a
+     * different value, and a handful of callers assume otherwise.
+     */
+    val mapSdkCompat: Boolean = true,
+
+    /**
+     * Answer the map SDKs' *address* getters with the anchor's own address.
+     *
+     * A rewritten coordinate rewrites a number, and nothing else. The city,
+     * province, street and POI the same payload carries are **strings the SDK
+     * computed from the real fix** — by asking its own server, not by consulting
+     * anything on the device — so no part of the coordinate path touches them. An
+     * app that maps the coordinates it is handed but prints the SDK's own
+     * `getCity()` ends up half converted: a fake map with a real city in the
+     * header.
+     *
+     * On by default, because answering *nothing* turned out to be worse than
+     * answering wrongly. Measured on CCB Life (2026-09-29): with the address left
+     * empty the app kept the city it had cached from the last real fix, so the
+     * header never moved no matter which anchor was set — a symptom identical to
+     * the module doing nothing at all, and much harder to diagnose.
+     *
+     * Turn it off for an app that misbehaves on a rewritten address; the getters
+     * then pass through whatever the SDK produced, exactly as before this existed.
+     */
+    val syncAddress: Boolean = true,
+
+    /**
+     * The anchor's address, resolved once by the picker's reverse geocoder and
+     * kept here for the hook side to hand back.
+     *
+     * Split into parts rather than stored as one formatted line, and that is not
+     * cosmetic: apps routinely turn the city *name* into a city *code* through
+     * their own lookup table, so `getCity()` has to answer the exact
+     * administrative name — "吉林市", not "吉林" — or the lookup silently finds
+     * nothing and the whole update path is skipped. CCB Life's home page does
+     * exactly that (`position_city_code = lookup(cityName).code`).
+     *
+     * Blank means "nothing configured for this part — leave that getter alone",
+     * which is what a config written before the first pick looks like.
+     */
+    val addrCountry: String = "",
+    val addrProvince: String = "",
+    val addrCity: String = "",
+    val addrDistrict: String = "",
+    val addrTown: String = "",
+    /**
+     * The street name, as `getStreet()` reports it.
+     *
+     * Separate from [addrLine] because they are different getters and a bridge
+     * reply can carry both: CCB's check-in page puts `BDLocation.getStreet()`
+     * into a `street` field next to the formatted `address`, and with this
+     * blank the spoofed reply carried no street at all while the real one did.
+     * The picker fills it from `address_component.street`.
+     */
+    val addrStreet: String = "",
+    val addrAdCode: String = "",
+    val addrCityCode: String = "",
+    /**
+     * The **place name** — the POI label, not the address.
+     *
+     * A check-in screen prints two strings: a place ("腾讯滨海大厦") and the
+     * address underneath it ("广东省深圳市南山区…"). The map SDKs publish both,
+     * through different getters: Tencent's `TencentLocation.getName()` and
+     * Amap's `AMapLocation.getPoiName()` carry the label, while `getAddress()` /
+     * `getAddrStr()` carry the formatted line.
+     *
+     * Kept apart from [addrLine] because the two are not interchangeable: an
+     * app that uses the name as a *title* and the address as a subtitle shows
+     * the address twice and the place never. 企业微信's check-in page is exactly
+     * that shape, which is why this field exists.
+     *
+     * Blank means "leave that getter alone" — the same convention as every other
+     * part here. The picker fills it from the reverse-geocode reply's recommended
+     * name (`formatted_addresses.recommend`), which is the label the SDK itself
+     * would have reported for that point.
+     */
+    val addrPlaceName: String = "",
+    /** The formatted one-line address, for `getAddrStr()` / `getAddress()`. */
+    val addrLine: String = "",
+
+    /**
+     * How the picker's map is drawn.
+     *
+     * These are the manager UI's own settings — the hook side never reads them,
+     * because the module does not draw maps and needs no key for anything it
+     * does. They live here anyway so that there is exactly one stored object,
+     * one decoder and one change notification rather than a second, parallel
+     * preference store that would have to be kept in step.
+     *
+     * Stored as an id rather than an enum ordinal; see [MapProvider] for why,
+     * and for what happens to a value written by a build that did not know
+     * about it.
+     */
+    val mapProviderId: String = MapProvider.DEFAULT.id,
+
+    /**
+     * The user's own keys, one slot per platform.
+     *
+     * Blank means "not configured". There is no built-in key to fall back on —
+     * this build deliberately carries no credential at all — so a blank field
+     * means the map cannot be drawn, and the picker says so instead of showing an
+     * empty grey square.
+     *
+     * **Baidu's and Amap's slots are still here although neither renderer is**
+     * (v1.5.0, 2026-09-29). They are part of every config blob this app has ever
+     * written, and keeping the schema stable is what makes removing a provider a
+     * code change rather than a migration — the same reason [mapProviderId]
+     * survives. An unknown id decodes to [MapProvider.DEFAULT]; the two orphaned
+     * keys simply sit there unread.
+     */
+    val mapAkBaidu: String = "",
+    val mapAkAmap: String = "",
+    val mapAkTencent: String = "",
+
+    /**
+     * Tencent's signing secret (`SK`) for [mapAkTencent].
+     *
+     * Only needed when that key has 签名校验 ("key signing") switched on in the
+     * console. Tencent's gateway then refuses every unsigned request with
+     * `status 111 签名验证失败` — which is exactly what this project hit on
+     * 2026-09-30 with a key that drew tiles perfectly and could not resolve an
+     * address to save its life.
+     *
+     * Blank is the correct value for a key without signing: the SDK appends a
+     * `sig` parameter only when it was handed a non-empty secret
+     * (`com.tencent.mapsdk.internal.mm` returns early on an empty key — read off
+     * the bytecode of `tencent-map-vector-sdk:5.9.0`), so leaving this alone
+     * keeps the request unsigned, exactly as before.
+     */
+    val mapSkTencent: String = "",
+
+    /**
+     * Places the user has already been: a short history plus whatever they
+     * pinned.
+     *
+     * One array, ordered newest first, with pinning as a flag rather than a
+     * second list — two lists would let the same spot exist in both and disagree
+     * about its address. The cap lives in [recordingAnchor], which is the only
+     * writer.
+     *
+     * Empty is the correct state for every blob written before this existed,
+     * and the home screen falls back to the built-in cities when it is.
+     */
+    val places: List<SavedPlace> = emptyList(),
+) {
+    /** `true` when latitude/longitude are inside WGS-84 bounds. */
+    val coordinatesValid: Boolean
+        get() = latitude in -90.0..90.0 && longitude in -180.0..180.0
+
+    /**
+     * Whether this configuration should rewrite anything at all.
+     *
+     * The per-process filter that used to live here (an in-app target list plus
+     * an "every app in scope" switch) is gone on purpose. It could only ever
+     * *narrow* what LSPosed had already injected into, so the effective scope was
+     * an AND of two lists kept in two different places — and the natural
+     * mistakes at that seam (a list never filled in, the switch left off) made
+     * the module look broken while LSPosed's own scope said it was installed.
+     * There is exactly one list now, and it is LSPosed's: *loaded into this
+     * process* equals *in scope*. That leaves [playing], which every channel
+     * already had to check anyway.
+     */
+    fun spoofs(): Boolean = playing
+
+    /**
+     * What a given SDK address getter should answer, or `null` to leave it be.
+     *
+     * The three SDKs name the same concepts slightly differently — `getAddrStr`
+     * (Baidu) vs `getAddress` (Amap, Tencent), `getNation` (Tencent) vs
+     * `getCountry` — so the mapping lives in one place instead of in each
+     * channel, where the three copies would drift.
+     *
+     * `null` means "no value configured" and the caller turns it into "proceed as
+     * before". It must never become an empty string: an empty city is a value the
+     * app will act on, and the one we measured acts on it by keeping its previous
+     * city forever.
+     *
+     * `getName()` / `getPoiName()` answer [addrPlaceName], never [addrLine]: on
+     * Tencent `getName` is the POI label and on Amap `getPoiName` is, and an app
+     * that prints it as a title above the formatted address would end up with
+     * the address in both slots.
+     */
+    fun addressFor(getter: String): String? {
+        val value = when (getter) {
+            "getCountry", "getNation" -> addrCountry
+            "getProvince" -> addrProvince
+            "getCity" -> addrCity
+            "getDistrict" -> addrDistrict
+            "getTown", "getTownship" -> addrTown
+            "getStreet" -> addrStreet
+            "getAdCode", "getAdcode" -> addrAdCode
+            "getCityCode" -> cityCode()
+            "getName", "getPoiName" -> addrPlaceName
+            "getAddrStr", "getAddress" -> addressLine()
+            else -> return null
+        }
+        return value.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * `true` once reverse geocoding has told us which city the anchor sits in.
+     *
+     * Either half is enough for the same reason [PickedAddress.isResolved] tests
+     * both: a municipality reports a city and leaves the province blank.
+     */
+    val addressKnown: Boolean
+        get() = addrCity.isNotBlank() || addrProvince.isNotBlank()
+
+    /**
+     * The formatted address, assembled from the parts when the picker did not
+     * receive one.
+     *
+     * Tencent's `geo2address` normally returns `result.address` ready to use, but
+     * a reply that carries only `address_component` is a real case (and the
+     * platform `Geocoder` never returns one at all), so a blank [addrLine] does
+     * not mean the address is unknown — it means only the parts are. Joining
+     * them is strictly better than answering nothing: CCB's check-in page reads
+     * `BDLocation.getAddrStr()` for the line under the place name, and it
+     * rendered "地理位置获取失败" for a fix whose province, city and district were
+     * all known but whose line was empty (measured 2026-11-12).
+     *
+     * Address order is province → city → district → street, which is how a
+     * mainland address is written; joining in any other order produces a string
+     * that reads like a mistranslation.
+     */
+    private fun addressLine(): String =
+        addrLine.takeIf { it.isNotBlank() }
+            ?: listOf(addrProvince, addrCity, addrDistrict, addrStreet)
+                .filter { it.isNotBlank() }
+                .joinToString("")
+
+    /**
+     * What `getCityCode()` should answer.
+     *
+     * Rejects a stored value that cannot be one. A city code in this sense is a
+     * short number — CCB's check-in page expects `194` — while the value a
+     * reverse geocoder hands out under the similar name is an *administrative
+     * division* code (nine digits, e.g. `156350200` for 厦门). A configuration
+     * written before the two were separated still carries the latter, and
+     * passing it on is worse than passing nothing: the page looks the value up
+     * in its own table, finds nothing, and reports "地理位置获取失败" while the
+     * reply looks complete. Measured 2026-11-12 on a config written that morning.
+     */
+    private fun cityCode(): String =
+        addrCityCode.takeIf { it.length in 1..4 && it.all(Char::isDigit) } ?: DEFAULT_CITY_CODE
+
+    /** Human-readable one-liner used by the manager UI header. */
+    fun summary(): String =
+        "%.6f, %.6f".format(latitude, longitude)
+
+    /** The platform the picker draws with. */
+    val mapProvider: MapProvider
+        get() = MapProvider.from(mapProviderId)
+
+    /**
+     * [provider]'s key field verbatim, blank included.
+     *
+     * This is the value a text field binds to, and a text field cannot tell
+     * `null` from the empty string while the user is halfway through pasting
+     * one — hence a raw `String` here and a nullable accessor for callers that
+     * only care whether there is something to use.
+     */
+    fun mapKeyValue(provider: MapProvider): String = when (provider) {
+        MapProvider.TENCENT -> mapAkTencent
+    }
+
+    /**
+     * [this] with [provider]'s key field replaced by [value].
+     *
+     * Routed through the provider rather than written to a named field so the
+     * settings page does not have to know which field it is editing. That mattered
+     * when the page switched between three; it is kept now because the alternative
+     * is a screen hard-coding `mapAkTencent` in two places, and because the day a
+     * second renderer returns is the day this `when` is the only code that has to
+     * learn about it.
+     */
+    fun withMapKey(provider: MapProvider, value: String): SpoofConfig = when (provider) {
+        MapProvider.TENCENT -> copy(mapAkTencent = value)
+    }
+
+    /**
+     * [provider]'s signing secret verbatim, blank included.
+     *
+     * Raw rather than nullable for the same reason [mapKeyValue] is: this is what
+     * a text field binds to. There is deliberately no `…For` twin — the SDK takes
+     * the empty string as "do not sign", so the blank value is a meaningful input
+     * here rather than something to be filtered out.
+     */
+    fun mapSecretValue(provider: MapProvider): String = when (provider) {
+        MapProvider.TENCENT -> mapSkTencent
+    }
+
+    /** [this] with [provider]'s signing secret replaced by [value]. */
+    fun withMapSecret(provider: MapProvider, value: String): SpoofConfig = when (provider) {
+        MapProvider.TENCENT -> copy(mapSkTencent = value)
+    }
+
+    /**
+     * The key to hand [provider]'s SDK, or `null` when there is nothing to hand
+     * it.
+     *
+     * `null` and "the empty string" are not interchangeable to these SDKs: an
+     * empty key reads as *a key was configured, and it is empty*, which turns a
+     * clear "not set up yet" into an authentication failure. So a blank field has
+     * to become `null` here and the caller has to skip the key setter entirely —
+     * see the guard in `TencentCanvas`.
+     *
+     * There is no second source to fall back to: this build carries no credential
+     * and no manifest entry for one, so this is the only key path there is.
+     */
+    fun mapKeyFor(provider: MapProvider): String? =
+        mapKeyValue(provider).takeIf { it.isNotBlank() }
+
+    /**
+     * Whether [provider] can be drawn at all.
+     *
+     * Deliberately answers "is there a key", not "does that key work" — the
+     * second question can only be answered by the platform's server, and a
+     * revoked key looks exactly like a working one until a request is made.
+     */
+    fun mapKeyConfigured(provider: MapProvider): Boolean = mapKeyFor(provider) != null
+}
+
+/** Preference keys. Both sides import these — never inline the literals. */
+object Keys {
+    /**
+     * The LSPosed *remote* preference group. The module reads it through
+     * `XposedModule.getRemotePreferences`, the UI writes it through
+     * `XposedService.getRemotePreferences`. This is the API-101 replacement for
+     * the old `XSharedPreferences` + `MODE_WORLD_READABLE` trick, and it works
+     * across processes and across users without root.
+     */
+    const val REMOTE_GROUP = "settings"
+
+    /** Single JSON blob holding the serialised [SpoofConfig]. */
+    const val CONFIG = "config"
+}
+
+/** Both default presets shown as chips on the home screen. */
+data class Coordinate(val nameRes: Int, val latitude: Double, val longitude: Double)
