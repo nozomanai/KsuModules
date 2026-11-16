@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>秋日状态栏</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #f4f1ea;
+            --card: #fffdf8;
+            --ink: #2a241c;
+            --muted: #6f675c;
+            --line: #e4dccd;
+            --accent: #9a4e1a;
+            --accent-ink: #fff8f2;
+            --danger: #8d2f24;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #16130f;
+                --card: #221e19;
+                --ink: #f3eadf;
+                --muted: #b3a898;
+                --line: #3a332b;
+                --accent: #e08a45;
+                --accent-ink: #2a160c;
+                --danger: #ffb4a8;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--ink);
+            font: 16px/1.45 "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+        }
+        main {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 20px 16px 32px;
+        }
+        h1 { font-size: 28px; margin: 0 0 4px; font-weight: 650; }
+        .lead { color: var(--muted); margin: 0 0 18px; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 14px;
+        }
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding: 14px 16px;
+        }
+        .row + .row { border-top: 1px solid var(--line); }
+        .copy { flex: 1; min-width: 0; }
+        .copy strong { display: block; font-size: 16px; }
+        .copy span { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+        button, input {
+            font: inherit;
+            color: inherit;
+        }
+        button {
+            border: 0;
+            border-radius: 12px;
+            padding: 12px 14px;
+            background: var(--accent);
+            color: var(--accent-ink);
+            width: 100%;
+        }
+        button.secondary {
+            background: transparent;
+            color: var(--ink);
+            border: 1px solid var(--line);
+        }
+        .actions { display: grid; gap: 8px; margin-bottom: 14px; }
+        label.field { display: block; padding: 0 16px 16px; }
+        input[type="number"] {
+            width: 100%;
+            margin-top: 8px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: transparent;
+        }
+        input[type="checkbox"] {
+            width: 22px;
+            height: 22px;
+            accent-color: var(--accent);
+        }
+        pre {
+            margin: 0;
+            padding: 14px 16px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font: 12px/1.5 ui-monospace, "Cascadia Mono", monospace;
+            color: var(--muted);
+        }
+        .status { min-height: 1.2em; color: var(--danger); font-size: 14px; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>秋日状态栏</h1>
+    <p class="lead">保存后会重启系统界面，当前这次界面不会自己改。</p>
+    <p class="status" id="status"></p>
+    <section class="card">
+        <label class="row">
+            <span class="copy">
+                <strong>隐藏 VoLTE</strong>
+                <span>状态栏里的 VoLTE / VoNR 一直隐藏，下拉通知栏或控制中心也不显示。</span>
+            </span>
+            <input id="hideVolte" type="checkbox">
+        </label>
+        <label class="row">
+            <span class="copy">
+                <strong>屏蔽二级界面</strong>
+                <span>下拉栏里长按音量或亮度不再进入二级界面。拖动调节不受影响。</span>
+            </span>
+            <input id="blockSlider" type="checkbox">
+        </label>
+        <label class="row">
+            <span class="copy">
+                <strong>熄屏指纹超时亮屏</strong>
+                <span>息屏按住屏下指纹，超过设定时间还没解开就亮起锁屏。</span>
+            </span>
+            <input id="fodWake" type="checkbox">
+        </label>
+        <label class="field">
+            <strong>超时时间</strong>
+            <span style="color:var(--muted);font-size:13px">单位毫秒。默认 300，范围 0 到 60000。</span>
+            <input id="fodTimeout" type="number" min="0" max="60000" step="1" inputmode="numeric">
+        </label>
+    </section>
+    <div class="actions">
+        <button id="save" type="button">保存并重启系统界面</button>
+        <button id="restart" class="secondary" type="button">只重启系统界面</button>
+        <button id="report" class="secondary" type="button">读取钩子报告</button>
+    </div>
+    <section class="card">
+        <pre id="output">钩子报告会在系统界面启动后写到它自己的数据目录。点上面的按钮读取。</pre>
+    </section>
+</main>
+<script type="module">
+const MODULE_ID = "autumn_systemui";
+const CONFIG = `/data/adb/modules/${MODULE_ID}/config.json`;
+const status = document.querySelector("#status");
+const output = document.querySelector("#output");
+const fields = {
+    hideVolte: document.querySelector("#hideVolte"),
+    blockSlider: document.querySelector("#blockSlider"),
+    fodWake: document.querySelector("#fodWake"),
+    fodTimeout: document.querySelector("#fodTimeout"),
+};
+
+const defaults = {
+    hide_volte_collapsed: true,
+    block_slider_detail: false,
+    fod_timeout_wake: true,
+    fod_timeout_ms: 300,
+};
+
+function apply(config) {
+    fields.hideVolte.checked = config.hide_volte_collapsed !== false;
+    fields.blockSlider.checked = config.block_slider_detail === true;
+    fields.fodWake.checked = config.fod_timeout_wake !== false;
+    const timeout = Number(config.fod_timeout_ms);
+    fields.fodTimeout.value = Number.isFinite(timeout) ? String(timeout) : "300";
+}
+
+function collect() {
+    const timeout = Number(fields.fodTimeout.value);
+    if (!Number.isInteger(timeout) || timeout < 0 || timeout > 60000) {
+        throw new Error("超时时间要是 0 到 60000 的整数");
+    }
+    return {
+        hide_volte_collapsed: fields.hideVolte.checked,
+        block_slider_detail: fields.blockSlider.checked,
+        fod_timeout_wake: fields.fodWake.checked,
+        fod_timeout_ms: timeout,
+    };
+}
+
+async function exec(command) {
+    try {
+        const mod = await import("kernelsu");
+        const result = await mod.exec(command);
+        return {
+            errno: result.errno ?? 0,
+            stdout: result.stdout ?? "",
+            stderr: result.stderr ?? "",
+        };
+    } catch (error) {
+        const bridge = globalThis.ksu;
+        if (bridge && typeof bridge.exec === "function") {
+            return await new Promise((resolve) => {
+                const name = "autumn_" + Math.random().toString(36).slice(2);
+                globalThis[name] = (errno, stdout, stderr) => {
+                    delete globalThis[name];
+                    resolve({ errno: errno ?? 0, stdout: stdout || "", stderr: stderr || "" });
+                };
+                bridge.exec(command, "{}", name);
+            });
+        }
+        throw error;
+    }
+}
+
+function shellQuote(value) {
+    return `'${String(value).replaceAll("'", `'\\''`)}'`;
+}
+
+async function loadConfig() {
+    const result = await exec(`cat ${CONFIG}`);
+    if (result.errno !== 0 || !result.stdout.trim()) {
+        apply(defaults);
+        status.textContent = "还没有配置文件，当前显示的是默认值。";
+        return;
+    }
+    apply(JSON.parse(result.stdout));
+    status.textContent = "";
+}
+
+async function save() {
+    const config = collect();
+    const json = JSON.stringify(config);
+    const command = `mkdir -p /data/adb/modules/${MODULE_ID} && printf %s ${shellQuote(json)} > ${CONFIG} && killall com.android.systemui`;
+    const result = await exec(command);
+    if (result.errno !== 0) {
+        throw new Error(result.stderr || result.stdout || "保存失败");
+    }
+    status.textContent = "已保存，正在重启系统界面。";
+}
+
+async function restart() {
+    const result = await exec("killall com.android.systemui");
+    if (result.errno !== 0) throw new Error(result.stderr || "重启失败");
+    status.textContent = "正在重启系统界面。";
+}
+
+async function readReport() {
+    const command = `
+for p in \\
+  /data/user_de/0/com.android.systemui/files/autumn_systemui_report.txt \\
+  /data/user/0/com.android.systemui/files/autumn_systemui_report.txt \\
+  /data/user_de/0/miui.systemui.plugin/files/autumn_systemui_report.txt \\
+  /data/user/0/miui.systemui.plugin/files/autumn_systemui_report.txt \\
+  /data/user_de/0/com.miui.systemui.plugin/files/autumn_systemui_report.txt \\
+  /data/user/0/com.miui.systemui.plugin/files/autumn_systemui_report.txt
+do
+  if [ -f "$p" ]; then
+    echo "---- $p"
+    cat "$p"
+    echo
+  fi
+done
+`.trim();
+    const result = await exec(command);
+    output.textContent = result.stdout.trim() || "还没有报告。先保存一次配置，让系统界面重新启动。";
+    if (result.errno !== 0 && !result.stdout.trim()) {
+        throw new Error(result.stderr || "读取报告失败");
+    }
+}
+
+function guard(task) {
+    return async () => {
+        try {
+            await task();
+        } catch (error) {
+            status.textContent = error && error.message ? error.message : String(error);
+        }
+    };
+}
+
+document.querySelector("#save").addEventListener("click", guard(save));
+document.querySelector("#restart").addEventListener("click", guard(restart));
+document.querySelector("#report").addEventListener("click", guard(readReport));
+apply(defaults);
+loadConfig().catch((error) => {
+    status.textContent = "请在 KernelSU 的模块界面里打开这个页面。" + (error && error.message ? " " + error.message : "");
+});
+</script>
+</body>
+</html>
