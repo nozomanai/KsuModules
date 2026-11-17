@@ -64,40 +64,40 @@ skip_if_installed() {
 }
 
 skip_if_installed com.android.quicksearchbox \
-  "$MODPATH/system/product/priv-app/MIUIQuickSearchBox" \
-  "$MODPATH/system/product/etc/permissions/privapp-permissions-miui-localization.xml"
+  "$MODPATH/product/priv-app/MIUIQuickSearchBox" \
+  "$MODPATH/product/etc/permissions/privapp-permissions-miui-localization.xml"
 
 skip_if_installed com.miui.voiceassist \
-  "$MODPATH/system/product/priv-app/VoiceAssistAndroidT" \
-  "$MODPATH/system/product/etc/permissions/privapp-permissions-miui-localization-voiceassist.xml"
+  "$MODPATH/product/priv-app/VoiceAssistAndroidT" \
+  "$MODPATH/product/etc/permissions/privapp-permissions-miui-localization-voiceassist.xml"
 
 skip_if_installed com.miui.voicetrigger \
-  "$MODPATH/system/product/app/VoiceTrigger" \
+  "$MODPATH/product/app/VoiceTrigger" \
   ""
 
 skip_if_installed com.xiaomi.aiasst.service \
-  "$MODPATH/system/product/app/MIUIAiasstService" \
+  "$MODPATH/product/app/MIUIAiasstService" \
   ""
 
 skip_if_installed com.xiaomi.aireco \
-  "$MODPATH/system/product/app/XiaoaiRecommendation" \
+  "$MODPATH/product/app/XiaoaiRecommendation" \
   ""
 
 skip_if_installed com.xiaomi.mibrain.speech \
-  "$MODPATH/system/product/data-app/MIUIXiaoAiSpeechEngine" \
+  "$MODPATH/product/data-app/MIUIXiaoAiSpeechEngine" \
   ""
 
 skip_if_installed com.miui.voiceassistProxy \
-  "$MODPATH/system/product/data-app/VoiceAssistProxy" \
+  "$MODPATH/product/data-app/VoiceAssistProxy" \
   ""
 
 skip_if_installed com.miui.voiceassistoverlay \
-  "$MODPATH/system/product/overlay/VoiceAssistAndroidOverlay" \
+  "$MODPATH/product/overlay/VoiceAssistAndroidOverlay" \
   ""
 
-log_msg "keep package=com.miui.weather2 path=system/product/priv-app/Weather reason=always-overlay"
-log_msg "keep package=com.android.calendar path=system/product/priv-app/Calendar reason=always-overlay"
-log_msg "keep package=com.miui.gallery path=system/product/priv-app/MiuiGallery reason=always-overlay"
-log_msg "keep package=com.android.deskclock path=system/product/app/DeskClock reason=always-overlay"
+log_msg "keep package=com.miui.weather2 path=product/priv-app/Weather reason=always-mount"
+log_msg "keep package=com.android.calendar path=product/priv-app/Calendar reason=always-mount"
+log_msg "keep package=com.miui.gallery path=product/priv-app/MiuiGallery reason=always-mount"
+log_msg "keep package=com.android.deskclock path=product/app/DeskClock reason=always-mount"
 
 log_msg "install end"

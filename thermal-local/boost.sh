@@ -10,6 +10,11 @@ DEF="$MODDIR/boost.default.xml"
 DST=/vendor/etc/perf/thermalbreakboostconfig.xml
 PERF_DST=/vendor/etc/perf/perfboostsconfig.xml
 PERF_GEN="$MODDIR/generated/perfboostsconfig.xml"
+VEND="$MODDIR/vendor/etc/perf"
+BOOST_OUT="$VEND/thermalbreakboostconfig.xml"
+PERF_OUT="$VEND/perfboostsconfig.xml"
+PERF_STOCK="$MODDIR/generated/perfboostsconfig.stock.xml"
+BREAK_STOCK="$MODDIR/generated/thermalbreak.stock.xml"
 MODE=$(tr -d ' \r\n' < "$MODDIR/mode" 2>/dev/null)
 flag() {
   [ -f "$1" ] || return 0
@@ -40,12 +45,66 @@ mounted() {
   awk -v dst="$1" '$2 == dst { found = 1 } END { exit found ? 0 : 1 }' /proc/mounts
 }
 
-while mounted "$DST"; do
-  umount "$DST" || break
-done
-while mounted "$PERF_DST"; do
-  umount "$PERF_DST" || break
-done
+vendor_source() {
+  awk '
+    $5 == "/vendor" {
+      for (i = 1; i <= NF; i++) if ($i == "-") { print $(i + 2); exit }
+    }
+  ' /proc/self/mountinfo
+}
+
+capture_stock() {
+  live=$1
+  dest=$2
+  if [ -s "$dest" ]; then
+    return 0
+  fi
+  mkdir -p "${dest%/*}"
+  if ! mounted "$live"; then
+    cp -f "$live" "$dest"
+    return $?
+  fi
+  raw=/data/local/tmp/thermal-local-vendor-raw
+  mkdir -p "$raw"
+  dev=$(vendor_source)
+  if [ -z "$dev" ] || ! mount -t erofs -o ro "$dev" "$raw"; then
+    log "stock read failed path=$live"
+    return 1
+  fi
+  rel=${live#/vendor/}
+  cp -f "$raw/$rel" "$dest"
+  status=$?
+  umount "$raw" 2>/dev/null || true
+  return $status
+}
+
+same_file() {
+  [ "$(stat -c '%d:%i' "$1" 2>/dev/null)" = "$(stat -c '%d:%i' "$2" 2>/dev/null)" ]
+}
+
+publish() {
+  src=$1
+  dest=$2
+  live=$3
+  mkdir -p "${dest%/*}"
+  if ! same_file "$src" "$dest"; then
+    cat "$src" > "$dest" || return 1
+  fi
+  chown root:root "$dest" 2>/dev/null || true
+  chmod 644 "$dest"
+  chcon u:object_r:vendor_configs_file:s0 "$dest" 2>/dev/null || true
+  if [ -n "$live" ] && mounted "$live" && ! same_file "$src" "$live" && ! same_file "$dest" "$live"; then
+    cat "$src" > "$live" || return 1
+  fi
+  return 0
+}
+
+if ! capture_stock "$DST" "$BREAK_STOCK"; then
+  log "thermalbreak stock missing"
+fi
+if ! capture_stock "$PERF_DST" "$PERF_STOCK"; then
+  log "perfboost stock missing"
+fi
 
 overlay=1
 if [ "$MODE" = "off" ] || [ ! -s "$SRC" ]; then
@@ -57,18 +116,22 @@ if [ "$overlay" = 1 ]; then
   chown root:root "$SRC" 2>/dev/null || true
   chmod 644 "$SRC"
   chcon u:object_r:vendor_configs_file:s0 "$SRC" 2>/dev/null || true
-  if ! mount -o bind "$SRC" "$DST"; then
-    log "boost mount failed"
+  if ! publish "$SRC" "$BOOST_OUT" "$DST"; then
+    log "boost publish failed"
     echo "boost mount failed" >&2
     exit 1
   fi
-  log "boost mounted"
+  log "boost published"
+else
+  if [ -s "$BREAK_STOCK" ]; then
+    publish "$BREAK_STOCK" "$BOOST_OUT" "$DST" || log "boost stock publish failed"
+  fi
 fi
 
 if [ "$overlay" = 1 ] || [ "$GPU" = "off" ] || [ "$CPU" = "off" ] || [ "$GPUR" = "off" ] || [ "$CPUR" = "off" ] || [ "$CPUU" = "off" ] || [ "$CPUA" = "off" ]; then
   mkdir -p "$MODDIR/generated"
   perf_ok=0
-  if cp -f "$PERF_DST" "$PERF_GEN"; then
+  if cat "$PERF_STOCK" > "$PERF_GEN"; then
     if [ "$overlay" = 1 ]; then
       # 0xFFF on the prime cluster is the touch-up boost that still reaches 4 GHz.
       sed -i \
@@ -291,11 +354,11 @@ if [ "$overlay" = 1 ] || [ "$GPU" = "off" ] || [ "$CPU" = "off" ] || [ "$GPUR" =
     chown root:root "$PERF_GEN" 2>/dev/null || true
     chmod 644 "$PERF_GEN"
     chcon u:object_r:vendor_configs_file:s0 "$PERF_GEN" 2>/dev/null || true
-    if mount -o bind "$PERF_GEN" "$PERF_DST"; then
-      log "perfboost mounted"
+    if publish "$PERF_GEN" "$PERF_OUT" "$PERF_DST"; then
+      log "perfboost published"
       perf_ok=1
     else
-      log "perfboost mount failed"
+      log "perfboost publish failed"
     fi
   else
     log "perfboost copy failed"
@@ -307,6 +370,14 @@ if [ "$overlay" = 1 ] || [ "$GPU" = "off" ] || [ "$CPU" = "off" ] || [ "$GPUR" =
   if [ "$(getprop init.svc.perf2-hal-1-0 2>/dev/null)" = "running" ]; then
     setprop ctl.restart perf2-hal-1-0
     log "perf2-hal restarted"
+  fi
+else
+  if [ -s "$PERF_STOCK" ] && publish "$PERF_STOCK" "$PERF_OUT" "$PERF_DST"; then
+    log "perfboost stock published"
+    if [ "$(getprop init.svc.perf2-hal-1-0 2>/dev/null)" = "running" ]; then
+      setprop ctl.restart perf2-hal-1-0
+      log "perf2-hal restarted"
+    fi
   fi
 fi
 
