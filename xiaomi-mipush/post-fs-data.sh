@@ -10,14 +10,13 @@ else
 fi
 
 . "$MODDIR/mount.sh"
+. "$MODDIR/drop-package.sh"
 
 log_msg "start moddir=$MODDIR"
-
-mkdir -p /data/adb/post-mount.d
-cp -a "$MODDIR/post-mount.sh" /data/adb/post-mount.d/xiaomi-mipush.sh
-chmod 0755 /data/adb/post-mount.d/xiaomi-mipush.sh
-chcon u:object_r:system_file:s0 /data/adb/post-mount.d/xiaomi-mipush.sh
-log_msg "post-mount hook installed"
-
-mount_framework
+rm -f "$MODDIR/skip_mount"
+rm -f /data/adb/post-mount.d/xiaomi-mipush.sh
+if ! grep -q " /data/adb/xiaomi-mipush-mnt " /proc/mounts; then
+  rm -rf /data/adb/xiaomi-mipush-mnt
+fi
+reset_xmsf_if_needed
 exit 0
