@@ -124,6 +124,13 @@
         </label>
         <label class="row">
             <span class="copy">
+                <strong>亮度旁的网络开关</strong>
+                <span>去掉控制中心的播放卡片。WiFi 在上，移动数据在下，叠在亮度左边。音量条仍在亮度右边。点按开关，长按还能进原来的详情。</span>
+            </span>
+            <input id="stackNet" type="checkbox">
+        </label>
+        <label class="row">
+            <span class="copy">
                 <strong>熄屏指纹超时亮屏</strong>
                 <span>息屏按住屏下指纹，超过设定时间还没解开就亮起锁屏。</span>
             </span>
@@ -152,6 +159,7 @@ const output = document.querySelector("#output");
 const fields = {
     hideVolte: document.querySelector("#hideVolte"),
     blockSlider: document.querySelector("#blockSlider"),
+    stackNet: document.querySelector("#stackNet"),
     fodWake: document.querySelector("#fodWake"),
     fodTimeout: document.querySelector("#fodTimeout"),
 };
@@ -159,6 +167,7 @@ const fields = {
 const defaults = {
     hide_volte_collapsed: true,
     block_slider_detail: false,
+    stack_connectivity: true,
     fod_timeout_wake: true,
     fod_timeout_ms: 300,
 };
@@ -166,6 +175,7 @@ const defaults = {
 function apply(config) {
     fields.hideVolte.checked = config.hide_volte_collapsed !== false;
     fields.blockSlider.checked = config.block_slider_detail === true;
+    fields.stackNet.checked = config.stack_connectivity !== false;
     fields.fodWake.checked = config.fod_timeout_wake !== false;
     const timeout = Number(config.fod_timeout_ms);
     fields.fodTimeout.value = Number.isFinite(timeout) ? String(timeout) : "300";
@@ -179,6 +189,7 @@ function collect() {
     return {
         hide_volte_collapsed: fields.hideVolte.checked,
         block_slider_detail: fields.blockSlider.checked,
+        stack_connectivity: fields.stackNet.checked,
         fod_timeout_wake: fields.fodWake.checked,
         fod_timeout_ms: timeout,
     };

@@ -13,6 +13,7 @@ object ModuleConfig {
     const val KEY_BLOCK_SLIDER_DETAIL = "block_slider_detail"
     const val KEY_FOD_TIMEOUT_WAKE = "fod_timeout_wake"
     const val KEY_FOD_TIMEOUT_MS = "fod_timeout_ms"
+    const val KEY_STACK_CONNECTIVITY = "stack_connectivity"
     const val FOD_TIMEOUT_DEFAULT_MS = 300L
     const val FOD_TIMEOUT_MAX_MS = 60_000L
     const val SYSTEM_UI = "com.android.systemui"
@@ -28,6 +29,9 @@ object ModuleConfig {
 
     @Volatile
     var fodTimeoutMs: Long = FOD_TIMEOUT_DEFAULT_MS
+
+    @Volatile
+    var stackConnectivity: Boolean = true
 
     @JvmStatic
     fun load(moduleDir: String?) {
@@ -47,10 +51,11 @@ object ModuleConfig {
             fodTimeoutWake = json.optBoolean(KEY_FOD_TIMEOUT_WAKE, true)
             fodTimeoutMs = json.optLong(KEY_FOD_TIMEOUT_MS, FOD_TIMEOUT_DEFAULT_MS)
                 .coerceIn(0L, FOD_TIMEOUT_MAX_MS)
+            stackConnectivity = json.optBoolean(KEY_STACK_CONNECTIVITY, true)
             Log.i(
                 TAG,
                 "config hideVolte=$hideVolteCollapsed slider=$blockSliderDetail " +
-                    "fod=$fodTimeoutWake timeout=$fodTimeoutMs",
+                    "fod=$fodTimeoutWake timeout=$fodTimeoutMs stack=$stackConnectivity",
             )
         } catch (error: Throwable) {
             Log.e(TAG, "config ${file.path}", error)

@@ -63,6 +63,7 @@ object SystemUiHooks {
         SliderDetail.enabled = ModuleConfig.blockSliderDetail
         FodTimeoutWake.enabled = ModuleConfig.fodTimeoutWake
         FodTimeoutWake.timeoutMs = ModuleConfig.fodTimeoutMs
+        ConnectivityStack.enabled = ModuleConfig.stackConnectivity
         if (!frameworkReady) {
             frameworkReady = true
             installFrameworkHooks()
@@ -415,6 +416,7 @@ object SystemUiHooks {
 
     private fun installClass(cls: Class<*>) {
         val lower = cls.name.lowercase()
+        ConnectivityStack.install(cls)
         if (cls.name == FodTimeoutWake.ICON) installFodTouch(cls)
         if (DexClassIndex.isPanelClass(lower)) installPanel(cls)
         if (cls.name == SliderDetail.BRIGHTNESS || cls.name == SliderDetail.VOLUME) {
@@ -554,7 +556,7 @@ object SystemUiHooks {
         note("volte ${cls.name} [${names.joinToString()}]")
     }
 
-    private fun hook(
+    internal fun hook(
         executable: Executable,
         block: (ArtHooks.Call) -> Any?,
     ) {
@@ -606,6 +608,7 @@ object SystemUiHooks {
             appendLine("hideCollapsed=${VolteVisibility.hideCollapsed}")
             appendLine("blockSliderDetail=${SliderDetail.enabled}")
             appendLine("fodWake=${FodTimeoutWake.enabled} timeout=${FodTimeoutWake.timeoutMs}")
+            appendLine("stackConnectivity=${ConnectivityStack.enabled} ${ConnectivityStack.status}")
             lines.take(120).forEach { appendLine(it) }
         }
         Log.i(TAG, text)
