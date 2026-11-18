@@ -62,7 +62,7 @@ zygisk {
     id = "autumn_systemui"
     name = "秋日状态栏"
     author = "Autumn"
-    description = "隐藏状态栏 VoLTE，屏蔽滑条二级界面，熄屏指纹超时亮屏，控制中心用上下叠放的 WiFi 和移动数据替换播放卡片"
+    description = "隐藏状态栏 VoLTE，屏蔽滑条二级界面，熄屏指纹超时亮屏，控制中心用上下叠放的 WiFi 和移动数据替换播放卡片，锁屏右滑不进入功能页"
     entrypoint = "io.autumn.systemui.zygote.ZygoteEntry"
     archiveName = "AutumnSystemUIPlus"
     isAddVariantToArchiveName = false

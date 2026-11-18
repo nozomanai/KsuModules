@@ -131,6 +131,13 @@
         </label>
         <label class="row">
             <span class="copy">
+                <strong>取消锁屏右滑</strong>
+                <span>锁屏上向右滑不再进入功能页，也不进入其他页面。上滑解锁不受影响。</span>
+            </span>
+            <input id="blockLockRight" type="checkbox">
+        </label>
+        <label class="row">
+            <span class="copy">
                 <strong>熄屏指纹超时亮屏</strong>
                 <span>息屏按住屏下指纹，超过设定时间还没解开就亮起锁屏。</span>
             </span>
@@ -160,6 +167,7 @@ const fields = {
     hideVolte: document.querySelector("#hideVolte"),
     blockSlider: document.querySelector("#blockSlider"),
     stackNet: document.querySelector("#stackNet"),
+    blockLockRight: document.querySelector("#blockLockRight"),
     fodWake: document.querySelector("#fodWake"),
     fodTimeout: document.querySelector("#fodTimeout"),
 };
@@ -168,6 +176,7 @@ const defaults = {
     hide_volte_collapsed: true,
     block_slider_detail: false,
     stack_connectivity: true,
+    block_lockscreen_right_page: true,
     fod_timeout_wake: true,
     fod_timeout_ms: 300,
 };
@@ -176,6 +185,7 @@ function apply(config) {
     fields.hideVolte.checked = config.hide_volte_collapsed !== false;
     fields.blockSlider.checked = config.block_slider_detail === true;
     fields.stackNet.checked = config.stack_connectivity !== false;
+    fields.blockLockRight.checked = config.block_lockscreen_right_page !== false;
     fields.fodWake.checked = config.fod_timeout_wake !== false;
     const timeout = Number(config.fod_timeout_ms);
     fields.fodTimeout.value = Number.isFinite(timeout) ? String(timeout) : "300";
@@ -190,6 +200,7 @@ function collect() {
         hide_volte_collapsed: fields.hideVolte.checked,
         block_slider_detail: fields.blockSlider.checked,
         stack_connectivity: fields.stackNet.checked,
+        block_lockscreen_right_page: fields.blockLockRight.checked,
         fod_timeout_wake: fields.fodWake.checked,
         fod_timeout_ms: timeout,
     };

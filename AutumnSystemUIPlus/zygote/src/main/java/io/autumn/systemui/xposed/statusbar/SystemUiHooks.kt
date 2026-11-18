@@ -64,6 +64,7 @@ object SystemUiHooks {
         FodTimeoutWake.enabled = ModuleConfig.fodTimeoutWake
         FodTimeoutWake.timeoutMs = ModuleConfig.fodTimeoutMs
         ConnectivityStack.enabled = ModuleConfig.stackConnectivity
+        LockscreenRightPage.enabled = ModuleConfig.blockLockscreenRightPage
         if (!frameworkReady) {
             frameworkReady = true
             installFrameworkHooks()
@@ -109,7 +110,10 @@ object SystemUiHooks {
             return
         }
         indexApk(app.applicationInfo)
-        if (app.packageName == ModuleConfig.SYSTEM_UI) installFod(loader)
+        if (app.packageName == ModuleConfig.SYSTEM_UI) {
+            installFod(loader)
+            installLockscreen(loader)
+        }
         loadIndexedClasses(loader)
         installHeaderExpansion(loader)
         findLoadedControllers()
@@ -149,7 +153,10 @@ object SystemUiHooks {
         val loader = classLoader(apk) ?: return
         if (!prepared.add(loader)) return
         indexApk(info)
-        if (info.packageName == ModuleConfig.SYSTEM_UI) installFod(loader)
+        if (info.packageName == ModuleConfig.SYSTEM_UI) {
+            installFod(loader)
+            installLockscreen(loader)
+        }
         loadIndexedClasses(loader)
         installHeaderExpansion(loader)
         findLoadedControllers()
@@ -382,6 +389,7 @@ object SystemUiHooks {
         }
         val lower = name.lowercase()
         return name == FodTimeoutWake.ICON ||
+            name == LockscreenRightPage.CONTROLLER ||
             DexClassIndex.isPanelClass(lower) ||
             DexClassIndex.isIconClass(lower) ||
             name in volteMethods
@@ -418,6 +426,7 @@ object SystemUiHooks {
         val lower = cls.name.lowercase()
         ConnectivityStack.install(cls)
         if (cls.name == FodTimeoutWake.ICON) installFodTouch(cls)
+        if (cls.name == LockscreenRightPage.CONTROLLER) installLockscreenRight(cls)
         if (DexClassIndex.isPanelClass(lower)) installPanel(cls)
         if (cls.name == SliderDetail.BRIGHTNESS || cls.name == SliderDetail.VOLUME) {
             installSliderLongClick(cls)
@@ -425,6 +434,30 @@ object SystemUiHooks {
         if (DexClassIndex.isIconClass(lower)) installIconClass(cls)
         val methodNames = volteMethods[cls.name].orEmpty()
         if (methodNames.isNotEmpty()) installVolteMethods(cls, methodNames)
+    }
+
+    private fun installLockscreen(loader: ClassLoader) {
+        try {
+            enqueue(Class.forName(LockscreenRightPage.CONTROLLER, false, loader))
+        } catch (error: Throwable) {
+            Log.e(TAG, "lockscreen right", error)
+        }
+    }
+
+    private fun installLockscreenRight(cls: Class<*>) {
+        try {
+            val allow = cls.getDeclaredMethod("supportMoveToRight")
+            val move = cls.getDeclaredMethod("onTouchMove", java.lang.Float.TYPE, java.lang.Float.TYPE)
+            hook(allow) { chain ->
+                if (LockscreenRightPage.enabled) false else chain.proceed()
+            }
+            hook(move) { chain ->
+                if (LockscreenRightPage.enabled) false else chain.proceed()
+            }
+            Log.i(TAG, "lockscreen right swipe blocked")
+        } catch (error: Throwable) {
+            Log.e(TAG, "lockscreen right", error)
+        }
     }
 
     private fun installFod(loader: ClassLoader) {
@@ -609,6 +642,7 @@ object SystemUiHooks {
             appendLine("blockSliderDetail=${SliderDetail.enabled}")
             appendLine("fodWake=${FodTimeoutWake.enabled} timeout=${FodTimeoutWake.timeoutMs}")
             appendLine("stackConnectivity=${ConnectivityStack.enabled} ${ConnectivityStack.status}")
+            appendLine("blockLockscreenRightPage=${LockscreenRightPage.enabled}")
             lines.take(120).forEach { appendLine(it) }
         }
         Log.i(TAG, text)
