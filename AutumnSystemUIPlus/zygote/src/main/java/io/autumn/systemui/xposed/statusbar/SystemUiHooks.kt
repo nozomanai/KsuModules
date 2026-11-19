@@ -65,6 +65,9 @@ object SystemUiHooks {
         FodTimeoutWake.timeoutMs = ModuleConfig.fodTimeoutMs
         ConnectivityStack.enabled = ModuleConfig.stackConnectivity
         LockscreenRightPage.enabled = ModuleConfig.blockLockscreenRightPage
+        LockscreenTimeout.enabled = ModuleConfig.lockscreenIgnoreTouch
+        LockscreenTimeout.timeoutMs = ModuleConfig.lockscreenTimeoutMs
+        if (packageName == ModuleConfig.SYSTEM_UI) LockscreenTimeout.installPowerHook()
         if (!frameworkReady) {
             frameworkReady = true
             installFrameworkHooks()
@@ -104,6 +107,7 @@ object SystemUiHooks {
 
     private fun onApplication(app: Application) {
         appContext = app
+        watchLockscreen(app)
         val loader = app.classLoader ?: return
         if (!prepared.add(loader)) {
             scheduleReport()
@@ -211,7 +215,12 @@ object SystemUiHooks {
 
     fun attachApplication(app: Application) {
         appContext = app
+        watchLockscreen(app)
         scheduleReport()
+    }
+
+    private fun watchLockscreen(app: Application) {
+        if (app.packageName == ModuleConfig.SYSTEM_UI) LockscreenTimeout.start(app)
     }
 
     private fun installFrameworkHooks() {
@@ -643,6 +652,7 @@ object SystemUiHooks {
             appendLine("fodWake=${FodTimeoutWake.enabled} timeout=${FodTimeoutWake.timeoutMs}")
             appendLine("stackConnectivity=${ConnectivityStack.enabled} ${ConnectivityStack.status}")
             appendLine("blockLockscreenRightPage=${LockscreenRightPage.enabled}")
+            appendLine("lockscreenTimeout=${LockscreenTimeout.status}")
             lines.take(120).forEach { appendLine(it) }
         }
         Log.i(TAG, text)
