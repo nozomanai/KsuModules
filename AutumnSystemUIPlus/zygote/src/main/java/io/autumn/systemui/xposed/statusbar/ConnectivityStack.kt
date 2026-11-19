@@ -19,10 +19,17 @@ import java.util.WeakHashMap
  * 控制中心播放卡片占亮度左边两格宽、两行高。
  * 打开后这块位置改成 WiFi 在上、移动数据在下，原来那一行大卡片不再占位。
  * 亮度、音量滑条的位置不动。
+ *
+ * 播放卡片会在主题或模糊就绪后再刷一次背景，给整块铺上灰色默认底，
+ * 卡片自己的纯色背景和按下反馈也会被这次刷新换掉。刷完后清掉这块底。
  */
 object ConnectivityStack {
     private const val TAG = ModuleConfig.TAG
     private const val MEDIA = "miui.systemui.controlcenter.panel.main.media.MediaPlayerController"
+    private const val MEDIA_HOLDER =
+        "miui.systemui.controlcenter.panel.main.media.MediaPlayerController\$MediaPlayerViewHolder"
+    private const val HOLDER =
+        "miui.systemui.controlcenter.panel.main.recyclerview.MainPanelItemViewHolder"
     private const val CARDS = "miui.systemui.controlcenter.panel.main.qs.QSCardsController"
     private const val CARD_VIEW = "miui.systemui.controlcenter.qs.tileview.QSCardItemView"
     private const val ICON_VIEW = "miui.systemui.controlcenter.qs.tileview.QSCardItemIconView"
@@ -39,6 +46,7 @@ object ConnectivityStack {
     private val mounted = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
     private val cardSpecs = Collections.synchronizedMap(WeakHashMap<View, String>())
     private val boundCards = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
+    private val wiredTiles = Collections.synchronizedMap(WeakHashMap<View, Any>())
     @Volatile
     private var cards: Any? = null
     @Volatile
@@ -48,13 +56,36 @@ object ConnectivityStack {
     fun install(cls: Class<*>) {
         when (cls.name) {
             MEDIA -> hookNamed(cls, "createViewHolder", 2, ::onCreateHolder)
+            MEDIA_HOLDER -> {
+                hookNamed(cls, "updateResources", 0, ::onMediaPaint)
+                hookNamed(cls, "onConfigurationChanged", 1, ::onMediaPaint)
+            }
+            HOLDER -> hookNamed(cls, "updateBlendBlur", 0, ::onMediaPaint)
             CARDS -> {
                 hookNamed(cls, "getListItems", 0, ::onListItems)
                 hookNamed(cls, "onStart", 0, ::onPanelStart)
                 hookNamed(cls, "onStop", 0, ::onPanelStop)
             }
-            CARD_VIEW -> hookNamed(cls, "updateSize", 0, ::onUpdateSize)
+            CARD_VIEW -> {
+                hookNamed(cls, "updateSize", 0, ::onUpdateSize)
+                hookNamed(cls, "getBackgroundBlendEnabled", 0, ::onBlendEnabled)
+            }
         }
+    }
+
+    private fun onMediaPaint(chain: ArtHooks.Call): Any? {
+        val result = chain.proceed()
+        val holder = chain.thisObject
+        if (holder != null && enabled) {
+            if (Looper.myLooper() == Looper.getMainLooper()) restore(holder) else main.post { restore(holder) }
+        }
+        return result
+    }
+
+    private fun onBlendEnabled(chain: ArtHooks.Call): Any? {
+        val card = chain.thisObject as? View
+        if (enabled && card != null && cardSpecs.containsKey(card)) return false
+        return chain.proceed()
     }
 
     private fun onCreateHolder(chain: ArtHooks.Call): Any? {
@@ -110,14 +141,9 @@ object ConnectivityStack {
             return
         }
         try {
-            root.setOnClickListener(null)
-            root.setOnLongClickListener(null)
-            root.isClickable = false
-            root.isLongClickable = false
-            root.isFocusable = false
             root.contentDescription = null
             root.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            root.background = null
+            quiet(root)
             val built = ArrayList<View>(specs.size)
             specs.forEach { spec ->
                 val card = inflateCard(root) ?: error("card $spec")
@@ -144,7 +170,7 @@ object ConnectivityStack {
             fillParent(column)
             mounted.add(root)
             roots[root] = true
-            root.post { root.background = null }
+            root.post { if (mounted.contains(root)) quiet(root) }
             status = "mounted"
             bind(root)
             Log.i(TAG, "connectivity stack $status")
@@ -167,17 +193,126 @@ object ConnectivityStack {
         for (index in 0 until column.childCount) {
             val card = column.getChildAt(index)
             val spec = cardSpecs[card] ?: continue
-            if (boundCards.contains(card)) continue
             val record = findRecord(controller, spec)
             if (record == null) {
                 status = "no $spec"
                 Log.i(TAG, "connectivity missing $spec")
                 continue
             }
-            if (wire(card, record)) {
+            val tile = call(record, "getTile")
+            if (tile == null) continue
+            if (wiredTiles[card] === tile) continue
+            wiredTiles[card]?.let { unwatch(it) }
+            if (wire(card, record, tile)) {
                 boundCards.add(card)
+                wiredTiles[card] = tile
                 status = "live"
                 Log.i(TAG, "connectivity wired $spec")
+            }
+        }
+    }
+
+    private fun restore(holder: Any) {
+        try {
+            val targets = rootsOf(holder).filter { mounted.contains(it) }
+            if (targets.isEmpty()) return
+            targets.forEach { view ->
+                if (view is ViewGroup) reclaim(view)
+                quiet(view)
+            }
+            (targets.first() as? ViewGroup)?.let { repaint(it) }
+            main.post {
+                targets.forEach { view ->
+                    if (!mounted.contains(view)) return@forEach
+                    if (view is ViewGroup) reclaim(view)
+                    quiet(view)
+                }
+            }
+        } catch (error: Throwable) {
+            Log.e(TAG, "connectivity restore", error)
+        }
+    }
+
+    private fun reclaim(root: ViewGroup) {
+        var column: View? = null
+        for (index in 0 until root.childCount) {
+            val child = root.getChildAt(index)
+            if (child is ViewGroup && holdsStack(child)) {
+                column = child
+                break
+            }
+        }
+        if (column == null) return
+        for (index in root.childCount - 1 downTo 0) {
+            if (root.getChildAt(index) !== column) root.removeViewAt(index)
+        }
+    }
+
+    private fun holdsStack(group: ViewGroup): Boolean {
+        for (index in 0 until group.childCount) {
+            if (cardSpecs.containsKey(group.getChildAt(index))) return true
+        }
+        return false
+    }
+
+    private fun rootsOf(holder: Any): List<View> {
+        val found = ArrayList<View>(2)
+        itemView(holder)?.let { found.add(it) }
+        val binding = readField(holder, "binding")
+        val root = binding?.let { call(it, "getRoot") as? View }
+        if (root != null && root !in found) found.add(root)
+        return found
+    }
+
+    private fun quiet(root: View) {
+        root.setOnClickListener(null)
+        root.setOnLongClickListener(null)
+        root.isClickable = false
+        root.isLongClickable = false
+        root.isFocusable = false
+        root.background = null
+        root.foreground = null
+        clearBlur(root)
+    }
+
+    private fun repaint(root: ViewGroup) {
+        val column = root.getChildAt(0) as? ViewGroup ?: return
+        for (index in 0 until column.childCount) {
+            val card = column.getChildAt(index)
+            if (!cardSpecs.containsKey(card)) continue
+            val state = readField(card, "state") ?: continue
+            val connected = readField(card, "connected") as? Boolean ?: false
+            val update = card.javaClass.methods.firstOrNull { method ->
+                method.name == "updateState" && method.parameterCount == 3
+            } ?: continue
+            update.invoke(card, state, connected, false)
+            fit(card)
+        }
+    }
+
+    private var clearBlurMethod: Method? = null
+    private var clearBlurTarget: Any? = null
+    private var blurLogged = false
+
+    private fun clearBlur(view: View) {
+        try {
+            val method = clearBlurMethod ?: run {
+                val utils = Class.forName(
+                    "miui.systemui.util.CommonUtils",
+                    false,
+                    view.context.classLoader,
+                )
+                val found = utils.getDeclaredMethod("clearMiBlurBlendEffect", View::class.java)
+                found.isAccessible = true
+                clearBlurTarget = utils.getField("INSTANCE").get(null)
+                clearBlurMethod = found
+                found
+            }
+            method.invoke(clearBlurTarget, view)
+        } catch (error: Throwable) {
+            if (!blurLogged) {
+                blurLogged = true
+                Log.e(TAG, "connectivity blur", error)
             }
         }
     }
@@ -185,22 +320,30 @@ object ConnectivityStack {
     private class TileWatch(var card: View)
 
     private val watches = HashMap<Any, TileWatch>()
+    private val callbacks = HashMap<Any, Any>()
 
-    private fun wire(card: View, record: Any): Boolean {
+    private fun wire(card: View, record: Any, tile: Any): Boolean {
         return try {
-            val tile = call(record, "getTile") ?: return false
             watch(tile, card)
-            setField(card, "clickAction", function(card) { view ->
-                view?.performHapticFeedback(1)
+            val click = View.OnClickListener { view ->
+                view.performHapticFeedback(1)
                 invokeTile(tile, "click")
-                null
-            })
-            setField(card, "longClickAction", function(card) { view ->
-                view?.performHapticFeedback(0)
+            }
+            val longClick = View.OnLongClickListener { view ->
+                view.performHapticFeedback(0)
                 val state = call(tile, "getState")
                 val dual = state?.let { boolField(it, "dualTarget") } == true
                 if (dual) invokeTile(tile, "secondaryClick") else invokeTile(tile, "longClick")
                 true
+            }
+            card.setOnClickListener(click)
+            card.setOnLongClickListener(longClick)
+            setField(card, "clickAction", function(card) { view ->
+                if (view != null) click.onClick(view)
+                null
+            })
+            setField(card, "longClickAction", function(card) { view ->
+                if (view == null) false else longClick.onLongClick(view)
             })
             pushState(tile, card)
             if (panelStarted) call(record, "setListening", true)
@@ -237,6 +380,17 @@ object ConnectivityStack {
             invoke(tile, callback)
         }
         watches[tile] = watch
+        callbacks[tile] = callback
+    }
+
+    private fun unwatch(tile: Any) {
+        val callback = callbacks.remove(tile)
+        watches.remove(tile)
+        if (callback == null) return
+        findMethod(tile.javaClass, "removeCallback", arrayOf(callback))?.apply {
+            isAccessible = true
+            invoke(tile, callback)
+        }
     }
 
     private fun pushState(tile: Any, card: View) {
@@ -273,16 +427,26 @@ object ConnectivityStack {
     }
 
     private fun setField(target: Any, name: String, value: Any) {
-        var type: Class<*>? = target.javaClass
+        val field = findField(target.javaClass, name) ?: return
+        field.set(target, value)
+    }
+
+    private fun readField(target: Any, name: String): Any? {
+        val field = findField(target.javaClass, name) ?: return null
+        return field.get(target)
+    }
+
+    private fun findField(start: Class<*>, name: String): java.lang.reflect.Field? {
+        var type: Class<*>? = start
         while (type != null) {
             val field = type.declaredFields.firstOrNull { it.name == name }
             if (field != null) {
                 field.isAccessible = true
-                field.set(target, value)
-                return
+                return field
             }
             type = type.superclass
         }
+        return null
     }
 
     private fun boolField(target: Any, name: String): Boolean {
