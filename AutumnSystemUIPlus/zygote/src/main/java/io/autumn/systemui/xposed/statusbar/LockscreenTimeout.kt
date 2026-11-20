@@ -1,70 +1,93 @@
 package io.autumn.systemui.xposed.statusbar
 
 import android.app.KeyguardManager
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.BatteryManager
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
-import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
 import io.autumn.systemui.ModuleConfig
+import io.autumn.systemui.zygote.ArtHooks
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 锁屏亮着时，触摸不再把息屏倒计时往后推。
+ * 锁屏亮着时，触摸不再把息屏倒计时往后推。熄屏仍由系统电源管理决定，
+ * 闹钟、来电、计时的唤醒锁和保持亮屏不会被打断。
  *
- * 通知栏窗口在锁屏上会把 userActivityTimeout 收成约 10 秒，并且带了
- * DISABLE_USER_ACTIVITY。输入管道因此不会因为触摸续时，但按下时
- * NotificationShadeWindowView 仍会调用 CentralSurfacesImpl.userActivity，
- * 密码盘、指纹图标也会直接调用 PowerManager.userActivity。
- * 锁屏期间丢掉系统界面里的这些调用，并保住窗口上的禁用标记。
- * 变暗之后的触摸仍会从系统服务里把倒计时续上，所以亮屏时按模块里的超时
- * 自己去睡。亮屏或刚锁上时记一次，作为这一轮的起点；解开锁屏后取消，
- * 再记一次，恢复正常息屏。
+ * 通知栏窗口带了 DISABLE_USER_ACTIVITY，亮屏时的输入管道不会续时。
+ * 按下时系统界面仍会调用 userActivity，这里丢掉这些调用。
+ * 变暗之后 MiuiInputManagerService.pokeUserActivity 会无视窗口标记再记一次，
+ * 这条在 system_server 里，锁屏显示时直接跳过。
  */
 object LockscreenTimeout {
     private const val TAG = ModuleConfig.TAG
     private const val CONTROLLER = "com.android.systemui.shade.NotificationShadeWindowControllerImpl"
     private const val INPUT_FEATURE_DISABLE_USER_ACTIVITY = 2
-    private const val GO_TO_SLEEP_REASON_TIMEOUT = 2
+    private const val USER_ACTIVITY_EVENT_TOUCH = 2
 
     @Volatile
     var enabled: Boolean = true
 
     @Volatile
-    var timeoutMs: Long = ModuleConfig.LOCKSCREEN_TIMEOUT_DEFAULT_MS
-
-    @Volatile
     private var locked = false
-
-    @Volatile
-    private var interactive = false
 
     private val started = AtomicBoolean(false)
     private val powerHooked = AtomicBoolean(false)
     private val windowHooked = AtomicBoolean(false)
+    private val serverHooked = AtomicBoolean(false)
+    private val pokeHooked = AtomicBoolean(false)
     private val loggedDrop = AtomicBoolean(false)
+    private val loggedPoke = AtomicBoolean(false)
     private val loggedWindow = AtomicBoolean(false)
     private val allowing = ThreadLocal.withInitial { false }
     private val fields = HashMap<String, Field>()
-    private val handler by lazy { Handler(Looper.getMainLooper()) }
-    private val sleeper = Runnable { sleepIfLocked() }
     private var powerManager: PowerManager? = null
-    private var appContext: Context? = null
     private var pokeMethod: Method? = null
-    private var sleepMethod: Method? = null
+    private var systemContext: Context? = null
 
     val status: String
-        get() = "enabled=$enabled timeout=$timeoutMs locked=$locked interactive=$interactive power=${powerHooked.get()} window=${windowHooked.get()}"
+        get() = "enabled=$enabled locked=$locked power=${powerHooked.get()} window=${windowHooked.get()} server=${serverHooked.get()} poke=${pokeHooked.get()}"
+
+    @JvmStatic
+    fun installInSystemServer() {
+        enabled = ModuleConfig.lockscreenIgnoreTouch
+        if (!enabled || !serverHooked.compareAndSet(false, true)) return
+        try {
+            val methods = PowerManager::class.java.declaredMethods.filter { method ->
+                method.name == "userActivity" && touchEventIndex(method) != null
+            }
+            methods.forEach { method ->
+                val eventIndex = touchEventIndex(method) ?: return@forEach
+                method.isAccessible = true
+                hookSafe(method) { chain ->
+                    val event = (chain.getArg(eventIndex) as? Number)?.toInt()
+                    if (event == USER_ACTIVITY_EVENT_TOUCH && keyguardLocked()) {
+                        if (loggedPoke.compareAndSet(false, true)) {
+                            Log.i(TAG, "lockscreen dim touch did not renew screen timeout")
+                        }
+                        null
+                    } else {
+                        chain.proceed()
+                    }
+                }
+            }
+            pokeHooked.set(methods.isNotEmpty())
+            Log.i(TAG, "lockscreen dim poke hooked x${methods.size}")
+        } catch (error: Throwable) {
+            serverHooked.set(false)
+            Log.e(TAG, "lockscreen dim poke", error)
+        }
+    }
+
+    private fun touchEventIndex(method: Method): Int? {
+        val types = method.parameterTypes
+        if (types.size >= 3 && types[0] == java.lang.Long.TYPE && types[1] == java.lang.Integer.TYPE) {
+            return 1
+        }
+        return null
+    }
 
     fun installPowerHook() {
         if (!enabled || !powerHooked.compareAndSet(false, true)) return
@@ -108,64 +131,29 @@ object LockscreenTimeout {
             return
         }
         powerManager = power
-        appContext = app
         locked = keyguard.isKeyguardLocked
-        interactive = power.isInteractive
         installWindowHook(app.classLoader)
-        register(app, keyguard)
-        Log.i(TAG, "lockscreen timeout watching locked=$locked interactive=$interactive")
-    }
-
-    private fun shouldBlock(): Boolean {
-        return enabled && locked && interactive && allowing.get() != true
-    }
-
-    private fun register(context: Context, keyguard: KeyguardManager) {
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_SCREEN_OFF)
-        }
-        if (Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            context.registerReceiver(receiver, filter)
-        }
-        if (Build.VERSION.SDK_INT >= 33) {
-            keyguard.addKeyguardLockedStateListener(context.mainExecutor) { now ->
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            keyguard.addKeyguardLockedStateListener(app.mainExecutor) { now ->
                 setLocked(now)
             }
         }
+        Log.i(TAG, "lockscreen timeout watching locked=$locked")
     }
 
-    private val receiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                Intent.ACTION_SCREEN_ON -> setInteractive(true)
-                Intent.ACTION_SCREEN_OFF -> setInteractive(false)
-            }
-        }
-    }
-
-    private fun setInteractive(now: Boolean) {
-        val was = interactive
-        interactive = now
-        if (!now) {
-            loggedDrop.set(false)
-            disarm()
-            return
-        }
-        if (!was && locked) poke("lockscreen countdown started", true)
+    private fun shouldBlock(): Boolean {
+        return enabled && locked && allowing.get() != true
     }
 
     private fun setLocked(now: Boolean) {
         val was = locked
         locked = now
-        if (!now) disarm()
-        if (was == now || !interactive) return
-        poke(if (now) "lockscreen countdown started" else "lockscreen unlocked, countdown resumed", now)
+        if (was && !now && powerManager?.isInteractive == true) {
+            noteUnlock()
+        }
     }
 
-    private fun poke(reason: String, scheduleSleep: Boolean) {
+    private fun noteUnlock() {
         val power = powerManager ?: return
         val method = pokeMethod ?: return
         allowing.set(true)
@@ -182,71 +170,28 @@ object LockscreenTimeout {
                 }
             }
             method.invoke(power, *args)
-            loggedDrop.set(false)
-            if (scheduleSleep) arm()
-            Log.i(TAG, reason)
+            Log.i(TAG, "lockscreen unlocked, screen timeout resumed")
         } catch (error: Throwable) {
-            Log.e(TAG, reason, error)
+            Log.e(TAG, "lockscreen unlocked", error)
         } finally {
             allowing.set(false)
         }
     }
 
-    private fun arm() {
-        val timeout = currentTimeout()
-        if (timeout <= 0L || timeout >= Int.MAX_VALUE || pluggedStayOn()) {
-            disarm()
-            return
-        }
-        handler.removeCallbacks(sleeper)
-        handler.postDelayed(sleeper, timeout)
-        Log.i(TAG, "lockscreen sleep in ${timeout}ms")
-    }
-
-    private fun disarm() {
-        handler.removeCallbacks(sleeper)
-    }
-
-    private fun currentTimeout(): Long {
-        return timeoutMs.coerceIn(
-            ModuleConfig.LOCKSCREEN_TIMEOUT_MIN_MS,
-            ModuleConfig.LOCKSCREEN_TIMEOUT_MAX_MS,
-        )
-    }
-
-    private fun pluggedStayOn(): Boolean {
-        val context = appContext ?: return false
-        val mode = Settings.Global.getInt(context.contentResolver, Settings.Global.STAY_ON_WHILE_PLUGGED_IN, 0)
-        if (mode == 0) return false
-        val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
-        return plugged != 0 && (mode and plugged) != 0
-    }
-
-    private fun sleepIfLocked() {
-        if (!enabled || !locked || !interactive) return
-        val power = powerManager ?: return
-        if (!power.isInteractive) return
-        try {
-            val method = sleepMethod ?: resolveSleep().also { sleepMethod = it }
-            val now = SystemClock.uptimeMillis()
-            if (method.parameterTypes.size >= 4) {
-                method.invoke(power, now, GO_TO_SLEEP_REASON_TIMEOUT, 0, 0)
-            } else {
-                method.invoke(power, now, GO_TO_SLEEP_REASON_TIMEOUT, 0)
-            }
-            Log.i(TAG, "lockscreen timeout goToSleep")
+    private fun keyguardLocked(): Boolean {
+        return try {
+            val context = systemContext ?: lookupSystemContext()?.also { systemContext = it } ?: return false
+            context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
         } catch (error: Throwable) {
-            Log.e(TAG, "goToSleep", error)
+            Log.e(TAG, "keyguard", error)
+            false
         }
     }
 
-    private fun resolveSleep(): Method {
-        val type = PowerManager::class.java
-        val methods = type.declaredMethods.filter { it.name == "goToSleep" }
-        return methods.firstOrNull { it.parameterTypes.size == 3 }
-            ?: methods.firstOrNull { it.parameterTypes.size >= 3 }
-            ?: throw NoSuchMethodException("goToSleep")
+    private fun lookupSystemContext(): Context? {
+        val threadClass = Class.forName("android.app.ActivityThread")
+        val thread = threadClass.getMethod("currentActivityThread").invoke(null) ?: return null
+        return threadClass.getMethod("getSystemContext").invoke(thread) as? Context
     }
 
     private fun installWindowHook(loader: ClassLoader?) {
@@ -275,6 +220,18 @@ object LockscreenTimeout {
             if (current != next) features.setInt(params, next)
         } catch (error: Throwable) {
             if (loggedWindow.compareAndSet(false, true)) Log.e(TAG, "inputFeatures", error)
+        }
+    }
+
+    private fun hookSafe(method: Method, block: (ArtHooks.Call) -> Any?) {
+        SystemUiHooks.hook(method) { chain ->
+            try {
+                block(chain)
+            } catch (error: Throwable) {
+                if (chain.proceeded) throw error
+                Log.e(TAG, "hook ${method.name}", error)
+                chain.proceed()
+            }
         }
     }
 

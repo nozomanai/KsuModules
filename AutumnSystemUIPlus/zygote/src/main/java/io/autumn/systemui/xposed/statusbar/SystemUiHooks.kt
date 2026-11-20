@@ -66,7 +66,6 @@ object SystemUiHooks {
         ConnectivityStack.enabled = ModuleConfig.stackConnectivity
         LockscreenRightPage.enabled = ModuleConfig.blockLockscreenRightPage
         LockscreenTimeout.enabled = ModuleConfig.lockscreenIgnoreTouch
-        LockscreenTimeout.timeoutMs = ModuleConfig.lockscreenTimeoutMs
         if (packageName == ModuleConfig.SYSTEM_UI) LockscreenTimeout.installPowerHook()
         if (!frameworkReady) {
             frameworkReady = true

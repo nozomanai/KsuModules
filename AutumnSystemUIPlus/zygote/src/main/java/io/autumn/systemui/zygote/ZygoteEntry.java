@@ -5,6 +5,7 @@ import android.util.Log;
 import com.v7878.zygisk.ZygoteLoader;
 
 import io.autumn.systemui.ModuleConfig;
+import io.autumn.systemui.xposed.statusbar.LockscreenTimeout;
 import io.autumn.systemui.xposed.statusbar.SystemUiHooks;
 
 public final class ZygoteEntry {
@@ -21,7 +22,12 @@ public final class ZygoteEntry {
 
     public static void main() {
         try {
-            SystemUiHooks.install(ZygoteLoader.getPackageName());
+            String packageName = ZygoteLoader.getPackageName();
+            if ("android".equals(packageName)) {
+                LockscreenTimeout.installInSystemServer();
+                return;
+            }
+            SystemUiHooks.install(packageName);
         } catch (Throwable error) {
             Log.e(ModuleConfig.TAG, "main", error);
         }

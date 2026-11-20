@@ -139,14 +139,9 @@
         <label class="row">
             <span class="copy">
                 <strong>锁屏触摸不续时</strong>
-                <span>锁屏亮着时，摸屏幕不会重新计算熄屏时间。到点就熄屏，解开锁屏后恢复正常。</span>
+                <span>锁屏亮着时，摸屏幕不会重新计算熄屏时间。熄屏仍按系统原来的规则，闹钟、来电、计时保持亮屏。</span>
             </span>
             <input id="lockTouch" type="checkbox">
-        </label>
-        <label class="field">
-            <strong>锁屏亮屏时间</strong>
-            <span style="color:var(--muted);font-size:13px">单位毫秒。默认 5000，也就是 5 秒。范围 1000 到 600000。摸锁屏不会把这一轮往后推。</span>
-            <input id="lockTimeout" type="number" min="1000" max="600000" step="1" inputmode="numeric">
         </label>
         <label class="row">
             <span class="copy">
@@ -181,7 +176,6 @@ const fields = {
     stackNet: document.querySelector("#stackNet"),
     blockLockRight: document.querySelector("#blockLockRight"),
     lockTouch: document.querySelector("#lockTouch"),
-    lockTimeout: document.querySelector("#lockTimeout"),
     fodWake: document.querySelector("#fodWake"),
     fodTimeout: document.querySelector("#fodTimeout"),
 };
@@ -192,7 +186,6 @@ const defaults = {
     stack_connectivity: true,
     block_lockscreen_right_page: true,
     lockscreen_ignore_touch: true,
-    lockscreen_timeout_ms: 5000,
     fod_timeout_wake: true,
     fod_timeout_ms: 300,
 };
@@ -203,8 +196,6 @@ function apply(config) {
     fields.stackNet.checked = config.stack_connectivity !== false;
     fields.blockLockRight.checked = config.block_lockscreen_right_page !== false;
     fields.lockTouch.checked = config.lockscreen_ignore_touch !== false;
-    const lockTimeout = Number(config.lockscreen_timeout_ms);
-    fields.lockTimeout.value = Number.isFinite(lockTimeout) ? String(lockTimeout) : "5000";
     fields.fodWake.checked = config.fod_timeout_wake !== false;
     const timeout = Number(config.fod_timeout_ms);
     fields.fodTimeout.value = Number.isFinite(timeout) ? String(timeout) : "300";
@@ -212,12 +203,8 @@ function apply(config) {
 
 function collect() {
     const timeout = Number(fields.fodTimeout.value);
-    const lockTimeout = Number(fields.lockTimeout.value);
     if (!Number.isInteger(timeout) || timeout < 0 || timeout > 60000) {
         throw new Error("指纹超时时间要是 0 到 60000 的整数");
-    }
-    if (!Number.isInteger(lockTimeout) || lockTimeout < 1000 || lockTimeout > 600000) {
-        throw new Error("锁屏亮屏时间要是 1000 到 600000 的整数");
     }
     return {
         hide_volte_collapsed: fields.hideVolte.checked,
@@ -225,7 +212,6 @@ function collect() {
         stack_connectivity: fields.stackNet.checked,
         block_lockscreen_right_page: fields.blockLockRight.checked,
         lockscreen_ignore_touch: fields.lockTouch.checked,
-        lockscreen_timeout_ms: lockTimeout,
         fod_timeout_wake: fields.fodWake.checked,
         fod_timeout_ms: timeout,
     };

@@ -16,12 +16,8 @@ object ModuleConfig {
     const val KEY_STACK_CONNECTIVITY = "stack_connectivity"
     const val KEY_BLOCK_LOCKSCREEN_RIGHT_PAGE = "block_lockscreen_right_page"
     const val KEY_LOCKSCREEN_IGNORE_TOUCH = "lockscreen_ignore_touch"
-    const val KEY_LOCKSCREEN_TIMEOUT_MS = "lockscreen_timeout_ms"
     const val FOD_TIMEOUT_DEFAULT_MS = 300L
     const val FOD_TIMEOUT_MAX_MS = 60_000L
-    const val LOCKSCREEN_TIMEOUT_DEFAULT_MS = 5_000L
-    const val LOCKSCREEN_TIMEOUT_MIN_MS = 1_000L
-    const val LOCKSCREEN_TIMEOUT_MAX_MS = 600_000L
     const val SYSTEM_UI = "com.android.systemui"
 
     @Volatile
@@ -45,9 +41,6 @@ object ModuleConfig {
     @Volatile
     var lockscreenIgnoreTouch: Boolean = true
 
-    @Volatile
-    var lockscreenTimeoutMs: Long = LOCKSCREEN_TIMEOUT_DEFAULT_MS
-
     @JvmStatic
     fun load(moduleDir: String?) {
         if (moduleDir.isNullOrEmpty()) {
@@ -69,14 +62,11 @@ object ModuleConfig {
             stackConnectivity = json.optBoolean(KEY_STACK_CONNECTIVITY, true)
             blockLockscreenRightPage = json.optBoolean(KEY_BLOCK_LOCKSCREEN_RIGHT_PAGE, true)
             lockscreenIgnoreTouch = json.optBoolean(KEY_LOCKSCREEN_IGNORE_TOUCH, true)
-            lockscreenTimeoutMs = json.optLong(KEY_LOCKSCREEN_TIMEOUT_MS, LOCKSCREEN_TIMEOUT_DEFAULT_MS)
-                .coerceIn(LOCKSCREEN_TIMEOUT_MIN_MS, LOCKSCREEN_TIMEOUT_MAX_MS)
             Log.i(
                 TAG,
                 "config hideVolte=$hideVolteCollapsed slider=$blockSliderDetail " +
                     "fod=$fodTimeoutWake timeout=$fodTimeoutMs stack=$stackConnectivity " +
-                    "lockRight=$blockLockscreenRightPage lockTouch=$lockscreenIgnoreTouch " +
-                    "lockTimeout=$lockscreenTimeoutMs",
+                    "lockRight=$blockLockscreenRightPage lockTouch=$lockscreenIgnoreTouch",
             )
         } catch (error: Throwable) {
             Log.e(TAG, "config ${file.path}", error)

@@ -15,8 +15,8 @@ android {
         applicationId = "io.autumn.systemui.zygote"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
     }
 
     buildTypes {
@@ -58,6 +58,8 @@ zygisk {
         "com.android.systemui",
         "miui.systemui.plugin",
         "com.miui.systemui.plugin",
+        "android",
+        "system_server",
     )
     id = "autumn_systemui"
     name = "秋日状态栏"
