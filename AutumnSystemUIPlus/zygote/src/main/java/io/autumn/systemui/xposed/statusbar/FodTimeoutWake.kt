@@ -15,7 +15,8 @@ import java.util.WeakHashMap
  * 对齐 fod-timeout-wake 对 MiuiGxzwIconView 的改动：
  * 只有 mDozing 时才向 mHandler 投递延时任务；抬手 removeCallbacks；
  * 到点后仍息屏、isUnlockByGxzw 为假、PowerManager 未交互，才
- * wakeUp(WAKE_REASON_BIOMETRIC, "com.android.systemui:FOD_TIMEOUT")。
+ * wakeUp(WAKE_REASON_POWER_BUTTON, "android.policy:POWER")。
+ * MiuiFaceUnlockManager 只对这个详情字符串按住画面，人脸先于亮屏启动。
  * 已经按下时的提前返回不会重新计时。
  */
 object FodTimeoutWake {
@@ -23,8 +24,8 @@ object FodTimeoutWake {
 
     private const val FACTORY = "com.miui.keyguard.biometrics.fod.MiuiFingerPrintFactory"
     private const val LOG_TAG = "MiuiGxzwViewIcon"
-    private const val WAKE_DETAIL = "com.android.systemui:FOD_TIMEOUT"
-    private const val WAKE_REASON_BIOMETRIC = 16
+    private const val WAKE_DETAIL = "android.policy:POWER"
+    private const val WAKE_REASON_POWER_BUTTON = 1
 
     @Volatile
     var enabled: Boolean = true
@@ -96,7 +97,7 @@ object FodTimeoutWake {
             java.lang.Integer.TYPE,
             String::class.java,
         ).also { wakeUp = it }
-        method.invoke(power, SystemClock.uptimeMillis(), WAKE_REASON_BIOMETRIC, WAKE_DETAIL)
+        method.invoke(power, SystemClock.uptimeMillis(), WAKE_REASON_POWER_BUTTON, WAKE_DETAIL)
     }
 
     private fun fingerPrintManager(view: Any): Any? {

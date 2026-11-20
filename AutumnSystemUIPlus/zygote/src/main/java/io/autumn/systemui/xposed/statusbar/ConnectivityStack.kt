@@ -22,6 +22,10 @@ import java.util.WeakHashMap
  *
  * 播放卡片会在主题或模糊就绪后再刷一次背景，给整块铺上灰色默认底，
  * 卡片自己的纯色背景和按下反馈也会被这次刷新换掉。刷完后清掉这块底。
+ *
+ * WiFi 和移动数据被从列表里拿掉后，原来的记录没有 ViewHolder。
+ * 长按打开二级页时，控制中心看到 holder 为空会直接返回。
+ * 把当前这张卡片挂成记录的 holder，二级页才能从这里展开。
  */
 object ConnectivityStack {
     private const val TAG = ModuleConfig.TAG
@@ -32,7 +36,10 @@ object ConnectivityStack {
         "miui.systemui.controlcenter.panel.main.recyclerview.MainPanelItemViewHolder"
     private const val CARDS = "miui.systemui.controlcenter.panel.main.qs.QSCardsController"
     private const val CARD_VIEW = "miui.systemui.controlcenter.qs.tileview.QSCardItemView"
+    private const val CARD_HOLDER = "miui.systemui.controlcenter.panel.main.qs.QSCardViewHolder"
     private const val ICON_VIEW = "miui.systemui.controlcenter.qs.tileview.QSCardItemIconView"
+    private const val PANEL_LAYOUT_LISTENER =
+        "miui.systemui.controlcenter.panel.main.recyclerview.d"
     private val specs = arrayOf("wifi", "cell")
 
     @Volatile
@@ -47,6 +54,8 @@ object ConnectivityStack {
     private val cardSpecs = Collections.synchronizedMap(WeakHashMap<View, String>())
     private val boundCards = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<View, Boolean>()))
     private val wiredTiles = Collections.synchronizedMap(WeakHashMap<View, Any>())
+    private val sources = Collections.synchronizedMap(WeakHashMap<View, Any>())
+    private val anchors = Collections.synchronizedMap(WeakHashMap<View, Any>())
     @Volatile
     private var cards: Any? = null
     @Volatile
@@ -92,6 +101,7 @@ object ConnectivityStack {
         val holder = chain.proceed()
         if (!enabled || holder == null) return holder
         val root = itemView(holder) as? ViewGroup ?: return holder
+        sources[root] = holder
         if (Looper.myLooper() == Looper.getMainLooper()) mount(root) else main.post { mount(root) }
         return holder
     }
@@ -201,7 +211,10 @@ object ConnectivityStack {
             }
             val tile = call(record, "getTile")
             if (tile == null) continue
-            if (wiredTiles[card] === tile) continue
+            if (wiredTiles[card] === tile) {
+                anchor(record, card)
+                continue
+            }
             wiredTiles[card]?.let { unwatch(it) }
             if (wire(card, record, tile)) {
                 boundCards.add(card)
@@ -330,6 +343,9 @@ object ConnectivityStack {
                 invokeTile(tile, "click")
             }
             val longClick = View.OnLongClickListener { view ->
+                anchor(record, view)
+                val handled = runRecordAction(record, "longClickAction", view)
+                if (handled != null) return@OnLongClickListener handled
                 view.performHapticFeedback(0)
                 val state = call(tile, "getState")
                 val dual = state?.let { boolField(it, "dualTarget") } == true
@@ -347,6 +363,7 @@ object ConnectivityStack {
             })
             pushState(tile, card)
             if (panelStarted) call(record, "setListening", true)
+            anchor(record, card)
             fit(card)
             true
         } catch (error: Throwable) {
@@ -450,8 +467,84 @@ object ConnectivityStack {
     }
 
     private fun boolField(target: Any, name: String): Boolean {
-        val field = target.javaClass.fields.firstOrNull { it.name == name } ?: return false
+        val field = findField(target.javaClass, name) ?: return false
         return field.getBoolean(target)
+    }
+
+    private fun anchor(record: Any, card: View) {
+        try {
+            val holder = anchors[card] ?: createAnchor(card)?.also { created ->
+                anchors[card] = created
+                Log.i(TAG, "connectivity anchor ${specOf(record)}")
+            } ?: return
+            val source = sourceOf(card)
+            if (source != null) {
+                call(source, "getOwner")?.let { owner -> call(holder, "setOwner", owner) }
+                readField(source, "mainPanelAdapter")?.let { adapter ->
+                    setField(holder, "mainPanelAdapter", adapter)
+                }
+            }
+            if (readField(holder, "mainPanelAdapter") == null) dropPanelLayoutListener(card)
+            val setHolder = findMethod(record.javaClass, "setHolder", arrayOf(holder))
+            if (setHolder == null) {
+                Log.e(TAG, "connectivity setHolder missing")
+                return
+            }
+            setHolder.isAccessible = true
+            setHolder.invoke(record, holder)
+        } catch (error: Throwable) {
+            Log.e(TAG, "connectivity anchor", error)
+        }
+    }
+
+    private fun createAnchor(card: View): Any? {
+        val loader = card.javaClass.classLoader ?: return null
+        val type = Class.forName(CARD_HOLDER, false, loader)
+        val ctor = type.declaredConstructors.firstOrNull { it.parameterCount == 1 } ?: return null
+        ctor.isAccessible = true
+        return ctor.newInstance(card)
+    }
+
+    private fun sourceOf(card: View): Any? {
+        var current: View? = card
+        while (current != null) {
+            val source = sources[current]
+            if (source != null) return source
+            current = current.parent as? View
+        }
+        return null
+    }
+
+    private fun dropPanelLayoutListener(view: View) {
+        try {
+            val infoField = View::class.java.getDeclaredField("mListenerInfo")
+            infoField.isAccessible = true
+            val info = infoField.get(view) ?: return
+            val listField = info.javaClass.getDeclaredField("mOnLayoutChangeListeners")
+            listField.isAccessible = true
+            val list = listField.get(info) as? MutableList<Any?> ?: return
+            val drop = list.filter { listener ->
+                listener?.javaClass?.name == PANEL_LAYOUT_LISTENER
+            }
+            drop.forEach { listener -> list.remove(listener) }
+        } catch (error: Throwable) {
+            Log.e(TAG, "connectivity holder layout", error)
+        }
+    }
+
+    private fun runRecordAction(record: Any, name: String, view: View): Boolean? {
+        val action = readField(record, name) ?: return null
+        return try {
+            val method = action.javaClass.methods.firstOrNull { candidate ->
+                candidate.name == "invoke" &&
+                    candidate.parameterCount == 1 &&
+                    candidate.parameterTypes[0].isAssignableFrom(View::class.java)
+            } ?: return null
+            method.invoke(action, view) as? Boolean ?: true
+        } catch (error: Throwable) {
+            Log.e(TAG, "connectivity $name", error)
+            null
+        }
     }
 
     private fun defaultValue(type: Class<*>): Any? {
