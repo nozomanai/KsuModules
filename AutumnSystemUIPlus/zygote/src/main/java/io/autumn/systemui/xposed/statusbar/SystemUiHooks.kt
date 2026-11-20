@@ -491,21 +491,6 @@ object SystemUiHooks {
                 chain.thisObject?.let { FodTimeoutWake.onReleased(it) }
                 chain.proceed()
             }
-            cls.declaredMethods.firstOrNull { method ->
-                method.name == "scheduleWakeIfNotUnlocked" && method.parameterCount == 0
-            }?.let { schedule ->
-                hook(schedule) { chain ->
-                    if (FodTimeoutWake.enabled) null else chain.proceed()
-                }
-            }
-            runCatching {
-                Class.forName("${cls.name}\$WakeIfNotUnlocked", false, cls.classLoader)
-                    .getDeclaredMethod("run")
-            }.getOrNull()?.let { run ->
-                hook(run) { chain ->
-                    if (FodTimeoutWake.enabled) null else chain.proceed()
-                }
-            }
             Log.i(TAG, "fod timeout wake hooked")
         } catch (error: Throwable) {
             Log.e(TAG, "fod timeout wake", error)
