@@ -137,6 +137,10 @@ internal object LateArmHooks {
             armed += runCatching { MapSdkHooks.install(loader) }
                 .onFailure { HookKit.error(TAG, "arming after $why failed", it) }
                 .getOrDefault(0)
+            runCatching { MiniAppLocationHooks.install(loader) }
+                .onFailure { HookKit.error(TAG, "arming mini app location after $why failed", it) }
+            runCatching { GadgetBridgeHooks.install(loader) }
+                .onFailure { HookKit.error(TAG, "arming gadget bridge after $why failed", it) }
         }
         if (armed > 0) {
             HookKit.info(TAG, "$armed channel(s) armed after $why")

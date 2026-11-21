@@ -394,6 +394,44 @@ internal object MapSdkHooks {
             if (!HookState.mapSdkEngaged()) return@hookAll chain.proceed()
             "success"
         }
+        // Feishu's own log and the page both read the fields `toJson` copies
+        // (`errorCode`, `errorInfo`, `locationDetail`, `isMock`), not the getters
+        // above. AMap writes those fields inside the GPS callback, before the
+        // listener runs, and `setErrorCode` refuses to change a code once it is
+        // non-zero. Forcing the write itself is what keeps the stored fix a
+        // success; rewriting the getter afterwards leaves the page on 定位失败.
+        HookKit.hookAll(locationClass, "setErrorCode", TAG) { chain ->
+            if (!HookState.mapSdkEngaged()) return@hookAll chain.proceed()
+            chain.proceed(arrayOf<Any?>(0))
+        }
+        HookKit.hookAll(locationClass, "setErrorInfo", TAG) { chain ->
+            if (!HookState.mapSdkEngaged()) return@hookAll chain.proceed()
+            chain.proceed(arrayOf<Any?>("success"))
+        }
+        HookKit.hookAll(locationClass, "setLocationDetail", TAG) { chain ->
+            if (!HookState.mapSdkEngaged()) return@hookAll chain.proceed()
+            val text = chain.args.firstOrNull() as? String
+            val failure = text != null && (
+                text.contains("失败") || text.contains("#") || text.contains("mock", ignoreCase = true)
+                )
+            if (failure) chain.proceed(arrayOf<Any?>("")) else chain.proceed()
+        }
+        // AMapLocation overrides these and does not call through to Location,
+        // so the hooks on android.location.Location never see them. Feishu
+        // stores the result of this override and treats a mock fix as a failure.
+        HookKit.hookAll(locationClass, "isMock", TAG) { chain ->
+            if (!HookState.antiMockEngaged()) return@hookAll chain.proceed()
+            false
+        }
+        HookKit.hookAll(locationClass, "setMock", TAG) { chain ->
+            if (!HookState.antiMockEngaged()) return@hookAll chain.proceed()
+            chain.proceed(arrayOf<Any?>(false))
+        }
+        HookKit.hookAll(locationClass, "setSatellites", TAG) { chain ->
+            if (!HookState.mapSdkEngaged()) return@hookAll chain.proceed()
+            val count = (chain.args.firstOrNull() as? Number)?.toInt() ?: 0
+            if (count >= 4) chain.proceed() else chain.proceed(arrayOf<Any?>(12))
+        }
 
         var opened = 0
         opened += HookKit.hookAll(clientClass, "setLocationListener", TAG) { chain ->
@@ -417,6 +455,35 @@ internal object MapSdkHooks {
     }
 
     /**
+     * Copies the configured address onto the AMap object.
+     *
+     * `AMapLocation.toJson` reads its own fields (`address`, `city`, …), not
+     * the getters [installAddressReads] rewrites. Feishu's page treats an empty
+     * address as 定位失败 even when the coordinate and the error code are fine.
+     */
+    private fun writeAmapAddress(location: Any) {
+        val cfg = HookState.config()
+        if (!cfg.syncAddress) return
+        val parts = listOf(
+            "setCountry" to cfg.addressFor("getCountry"),
+            "setProvince" to cfg.addressFor("getProvince"),
+            "setCity" to cfg.addressFor("getCity"),
+            "setDistrict" to cfg.addressFor("getDistrict"),
+            "setTownship" to cfg.addressFor("getTownship"),
+            "setStreet" to cfg.addressFor("getStreet"),
+            "setAddress" to cfg.addressFor("getAddress"),
+            "setPoiName" to cfg.addressFor("getPoiName"),
+            "setAdCode" to cfg.addressFor("getAdCode"),
+            "setCityCode" to cfg.addressFor("getCityCode"),
+        )
+        for ((name, value) in parts) {
+            if (value.isNullOrEmpty()) continue
+            val setter = HookKit.findMethod(location.javaClass, name, String::class.java) ?: continue
+            runCatching { setter.invoke(location, value) }
+        }
+    }
+
+    /**
      * Wires one `AMapLocationListener`: its callback gets rewritten, and the
      * listener is enrolled for the active push.
      */
@@ -424,7 +491,10 @@ internal object MapSdkHooks {
         val hooked = HookKit.hookAll(listener.javaClass, "onLocationChanged", TAG) { chain ->
             if (!HookState.mapSdkEngaged()) return@hookAll chain.proceed()
             for (argument in chain.args) {
-                (argument as? Location)?.let { HookState.applyTo(it, Datum.GCJ02) }
+                (argument as? Location)?.let {
+                    HookState.applyTo(it, Datum.GCJ02)
+                    writeAmapAddress(it)
+                }
             }
             chain.proceed()
         }
@@ -475,6 +545,7 @@ internal object MapSdkHooks {
             HookState.stampTiming(payload)
             HookState.applyTo(payload, Datum.GCJ02)
             for ((setter, value) in success) setter.invoke(payload, value)
+            writeAmapAddress(payload)
             method.invoke(target, payload)
         }
     }

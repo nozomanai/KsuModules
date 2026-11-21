@@ -124,6 +124,15 @@ data class SpoofConfig(
     val syncAddress: Boolean = true,
 
     /**
+     * Master switch for every log line this module writes.
+     *
+     * Off by default. A hooked app can read logcat entries from its own uid, so
+     * the diagnostic lines stay out of that process unless this is turned on.
+     * The same switch covers `system_server`.
+     */
+    val log: Boolean = false,
+
+    /**
      * The anchor's address, resolved once by the picker's reverse geocoder and
      * kept here for the hook side to hand back.
      *

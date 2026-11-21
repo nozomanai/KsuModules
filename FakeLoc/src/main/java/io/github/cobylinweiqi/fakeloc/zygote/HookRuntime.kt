@@ -11,6 +11,7 @@ import io.github.cobylinweiqi.fakeloc.xposed.hooks.LateArmHooks
 import io.github.cobylinweiqi.fakeloc.xposed.hooks.ListenerHooks
 import io.github.cobylinweiqi.fakeloc.xposed.hooks.LocationHooks
 import io.github.cobylinweiqi.fakeloc.xposed.hooks.MapSdkHooks
+import io.github.cobylinweiqi.fakeloc.xposed.hooks.MiniAppLocationHooks
 import io.github.cobylinweiqi.fakeloc.xposed.hooks.PlayServicesHooks
 import io.github.cobylinweiqi.fakeloc.xposed.hooks.SourceLockHooks
 import io.github.cobylinweiqi.fakeloc.xposed.hooks.WebBridgeHooks
@@ -58,6 +59,7 @@ object HookRuntime {
         AntiMockHooks.installApp(loader)
         SourceLockHooks.install(loader)
         MapSdkHooks.install(loader)
+        MiniAppLocationHooks.install(loader)
         WebBridgeHooks.install()
         DynamicLoaderHooks.install()
         LateArmHooks.install(loader)

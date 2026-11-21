@@ -3,7 +3,6 @@ package io.github.cobylinweiqi.fakeloc.xposed.hooks
 import io.github.cobylinweiqi.fakeloc.xposed.HookKit
 import io.github.cobylinweiqi.fakeloc.xposed.HookState
 import io.github.cobylinweiqi.fakeloc.xposed.LocationPayload
-import java.lang.reflect.Method
 
 /**
  * Hooks inside `system_server`, installed only when `system` (or `android`) is in
@@ -44,42 +43,18 @@ internal object FrameworkLocationHooks {
 
     /** Path labels for the one-shot delivery breadcrumbs in [Diag]. */
     private const val PATH_PULL = "system:getLastLocation"
-    private const val PATH_PUSH = "system:onReportLocation"
 
     private val LOCATION_SERVICE_CLASSES = arrayOf(
         "com.android.server.location.LocationManagerService",
         "com.android.server.LocationManagerService",
     )
 
-    /** Android 12 moved provider bookkeeping into its own package. */
-    private val PROVIDER_MANAGER_CLASSES = arrayOf(
-        "com.android.server.location.provider.LocationProviderManager",
-        "com.android.server.location.LocationProviderManager",
-    )
-
-    private val GNSS_SERVICE_CLASSES = arrayOf(
-        "com.android.server.location.gnss.GnssManagerService",
-    )
-
-    /**
-     * Raw-GNSS entry points. Their data is measured by the receiver itself, so it
-     * would contradict the fabricated fix and is a strong detector signal. Real
-     * devices frequently report these as unsupported, so suppressing them is not
-     * itself suspicious.
-     */
-    private val GNSS_REGISTRATIONS = arrayOf(
-        "addGnssMeasurementsListener",
-        "addGnssNavigationMessageListener",
-        "addGnssAntennaInfoListener",
-        "addGnssBatchingCallback",
-        "registerGnssNmeaCallback",
-        "registerGnssStatusCallback",
-    )
-
     fun install(classLoader: ClassLoader) {
         hookLastLocation(classLoader)
-        hookProviderReports(classLoader)
-        suppressRawGnss(classLoader)
+        // Do not hook LocationProviderManager.onReportLocation. With that hook
+        // installed, gps/fused stay at last location=null and every app,
+        // including ones outside the scope, drops its GPS request in a few
+        // hundred milliseconds.
     }
 
     // --------------------------------------------------------- pull path
@@ -97,44 +72,6 @@ internal object FrameworkLocationHooks {
                 LocationPayload.overwriteAll(result, PATH_PULL)
             }
             result
-        }
-    }
-
-    // --------------------------------------------------------- push path
-
-    private fun hookProviderReports(classLoader: ClassLoader) {
-        val providerClass = HookKit.findClass(classLoader, *PROVIDER_MANAGER_CLASSES)
-        if (providerClass == null) {
-            // Pre-12 keeps the dispatch inside LocationManagerService; the
-            // getLastLocation hook above still covers the pull side there.
-            HookKit.info(TAG, "LocationProviderManager not found; push path not hooked")
-            return
-        }
-
-        HookKit.hookAllLogged(providerClass, "onReportLocation", TAG) { chain ->
-            if (HookState.active()) {
-                chain.args.forEach { argument -> LocationPayload.overwriteAll(argument, PATH_PUSH) }
-            }
-            chain.proceed()
-        }
-    }
-
-    // ------------------------------------------------------- raw GNSS
-
-    private fun suppressRawGnss(classLoader: ClassLoader) {
-        val serviceClass = HookKit.findClass(classLoader, *GNSS_SERVICE_CLASSES) ?: return
-
-        for (methodName in GNSS_REGISTRATIONS) {
-            val methods = HookKit.methodsNamed(serviceClass, methodName)
-            if (methods.isEmpty()) continue
-
-            HookKit.hookAllLogged(serviceClass, methodName, TAG) { chain ->
-                if (!HookState.antiMockEngaged()) {
-                    return@hookAllLogged chain.proceed()
-                }
-                val executable = chain.executable
-                HookKit.defaultValueFor(executable as? Method)
-            }
         }
     }
 }

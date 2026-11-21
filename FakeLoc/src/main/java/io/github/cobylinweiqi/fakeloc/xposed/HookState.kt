@@ -26,9 +26,6 @@ internal object HookState {
     private const val STATE_CONFIG = "/data/adb/fakeloc/config.json"
 
     @Volatile
-    var verbose: Boolean = false
-
-    @Volatile
     private var current: SpoofConfig = SpoofConfig()
 
     @Volatile
@@ -100,11 +97,11 @@ internal object HookState {
     fun packageName(): String? = processPackage
 
     /**
-     * An app can read logcat entries written by its own uid. `system_server`
-     * (`android`) is a different uid, so its lines stay available for diagnosis.
-     * [verbose] re-opens the app-process log on purpose.
+     * One switch for every log line, in the hooked app and in `system_server`.
+     * [SpoofConfig.log] defaults to off, so a target cannot read these lines
+     * back out of its own logcat.
      */
-    fun mayLog(): Boolean = verbose || processPackage == "android"
+    fun mayLog(): Boolean = config().log
 
     fun position(): Pair<Double, Double> {
         val cfg = config()
@@ -158,6 +155,16 @@ internal object HookState {
             stampTiming(fake)
         }
         applyTo(fake)
+        // AMap treats a GPS fix as mocked when extras have no satellite count,
+        // or when altitude, bearing and speed are all zero while it has not
+        // seen a satellite. Feishu then drops the callback and shows 定位失败.
+        // Probe only prints the coordinate, so it never hits this check.
+        if (fake.extras?.getInt("satellites") ?: 0 <= 0) {
+            val extras = fake.extras ?: android.os.Bundle()
+            extras.putInt("satellites", 12)
+            fake.extras = extras
+        }
+        if (fake.bearing == 0f) fake.bearing = 1f
         return fake
     }
 

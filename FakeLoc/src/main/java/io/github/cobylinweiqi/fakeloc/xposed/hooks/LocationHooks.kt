@@ -1,9 +1,12 @@
 package io.github.cobylinweiqi.fakeloc.xposed.hooks
 
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import io.github.cobylinweiqi.fakeloc.xposed.Diag
 import io.github.cobylinweiqi.fakeloc.xposed.HookKit
 import io.github.cobylinweiqi.fakeloc.xposed.HookState
@@ -178,6 +181,23 @@ internal object LocationHooks {
             if (original != null) Diag.observeFix(PATH_LAST_KNOWN, original)
             val provider = chain.args.getOrNull(0) as? String
             HookState.buildLocation(original, provider)
+        }
+
+        // A fresh request does not use the cache. The platform delivered no
+        // callback while Probe kept listening, and Feishu cancels the request
+        // after about a second, which is the 定位失败 screen. Hand the
+        // listener a fix as soon as it subscribes.
+        HookKit.hookAll(managerClass, "requestLocationUpdates", TAG) { chain ->
+            val result = chain.proceed()
+            if (!HookState.active()) return@hookAll result
+            val listener = chain.args.firstOrNull { it is LocationListener } as? LocationListener
+                ?: return@hookAll result
+            val provider = chain.args.firstOrNull { it is String } as? String
+            val fix = HookState.buildLocation(null, provider)
+            Handler(Looper.getMainLooper()).post {
+                runCatching { listener.onLocationChanged(fix) }
+            }
+            result
         }
 
         // `getCurrentLocation(provider, cancelSignal, executor, consumer)` — the

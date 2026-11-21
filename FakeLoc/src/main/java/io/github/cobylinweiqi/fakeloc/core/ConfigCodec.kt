@@ -33,6 +33,7 @@ object ConfigCodec {
     private const val K_STRICT_SOURCES = "strict_sources"
     private const val K_MAP_SDK = "map_sdk_compat"
     private const val K_SYNC_ADDRESS = "sync_address"
+    private const val K_LOG = "log"
     private const val K_ADDR_COUNTRY = "addr_country"
     private const val K_ADDR_PROVINCE = "addr_province"
     private const val K_ADDR_CITY = "addr_city"
@@ -109,6 +110,7 @@ object ConfigCodec {
         put(K_STRICT_SOURCES, config.strictSources)
         put(K_MAP_SDK, config.mapSdkCompat)
         put(K_SYNC_ADDRESS, config.syncAddress)
+        put(K_LOG, config.log)
         put(K_ADDR_COUNTRY, config.addrCountry)
         put(K_ADDR_PROVINCE, config.addrProvince)
         put(K_ADDR_CITY, config.addrCity)
@@ -164,6 +166,7 @@ object ConfigCodec {
             strictSources = json.optBoolean(K_STRICT_SOURCES, defaults.strictSources),
             mapSdkCompat = json.optBoolean(K_MAP_SDK, defaults.mapSdkCompat),
             syncAddress = json.optBoolean(K_SYNC_ADDRESS, defaults.syncAddress),
+            log = json.optBoolean(K_LOG, defaults.log),
             addrCountry = decodeText(json, K_ADDR_COUNTRY, defaults.addrCountry),
             addrProvince = decodeText(json, K_ADDR_PROVINCE, defaults.addrProvince),
             addrCity = decodeText(json, K_ADDR_CITY, defaults.addrCity),
